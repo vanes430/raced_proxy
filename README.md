@@ -2,6 +2,8 @@
 
 Fast proxy checker + racing proxy server built with **Golang**. Runs high-concurrency checks using native goroutines, performs triple-stage verification, and races multiple proxies simultaneously to return the fastest response.
 
+[![release](https://img.shields.io/github/v/release/vanes430/raced_proxy)](https://github.com/vanes430/raced_proxy/releases)
+
 ## Features
 
 - **High-Performance Concurrency** — Built with Golang's native goroutines for massive connection throughput without event-loop lag.
@@ -19,18 +21,17 @@ Fast proxy checker + racing proxy server built with **Golang**. Runs high-concur
 - **Auth Support** — Optional Basic proxy authentication.
 - **Hot Reload** — Auto-reloads `proxy.txt` when file changes.
 - **Fancy Logging** — ANSI colored terminal output with unicode icons.
+- **Auto CI/CD** — Every push builds 4 targets (linux/windows × amd64/arm64) and creates a GitHub release.
 
-## Quick Start
+## Download
+
+Grab the latest pre-built binary from [releases](https://github.com/vanes430/raced_proxy/releases).  
+Each zip includes the binary, `.env.example`, and `url-list.txt`.
+
+## Build from Source
 
 ```bash
-# 1. Compile the tool
-go build -o raced_proxy cmd/raced_proxy/main.go
-
-# 2. Run the proxy scanner to generate proxy.txt
-./raced_proxy scan
-
-# 3. Run the rotator server
-./raced_proxy rotate
+go build -ldflags="-s -w" -o raced_proxy cmd/raced_proxy/main.go
 ```
 
 ## Usage
@@ -59,16 +60,16 @@ Customize parameters inside the `.env` file:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8090` | Rotator listen port |
-| `CONCURRENCY` | `1000` | Checker concurrent limits |
-| `TIMEOUT` | `1500` | Proxy connect timeout (ms) |
+| `CONCURRENCY` | `1000` | Scanner concurrent goroutine limit |
+| `TIMEOUT` | `1500` | Proxy connect / read timeout (ms) |
 | `MAX_LATENCY` | `1500` | Max accepted latency (ms) |
 | `OUTPUT` | `proxy.txt` | Output file |
-| `RACE` | `20` | Number of proxies to race per request |
-| `STAGGER` | `20` | Racing staggered firing delay (ms) |
+| `RACE` | `20` | Proxies to race per request |
+| `STAGGER` | `20` | Racing stagger delay (ms) |
 | `PROXY_USER` | - | Auth username (empty = no auth) |
 | `PROXY_PASS` | - | Auth password (empty = no auth) |
-| `WINNER_TTL` | `10` | Max wins before a champion goes on cooldown |
-| `WINNER_COOLDOWN` | `20` | How many runs a champion cools down |
+| `WINNER_TTL` | `10` | Max wins before champion goes on cooldown |
+| `WINNER_COOLDOWN` | `20` | Cooldown runs for a champion |
 
 ## Architecture
 
