@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"crypto/tls"
 	"os"
 	"strconv"
 	"strings"
@@ -34,4 +35,11 @@ func GetEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	return val
+}
+
+func GetTLSConfig(serverName string) *tls.Config {
+	return &tls.Config{
+		ServerName:         serverName,
+		InsecureSkipVerify: true,
+	}
 }

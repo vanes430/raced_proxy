@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"math"
@@ -15,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"proxy_check/internal/logger"
+	"raced_proxy/internal/logger"
 )
 
 var (
@@ -69,16 +70,20 @@ func LoadProxies() {
 }
 
 func WatchProxyFile() {
+	var prevHash string
 	for {
 		time.Sleep(3 * time.Second)
-		stat, err := os.Stat(proxyFile)
+		data, err := os.ReadFile(proxyFile)
 		if err != nil {
 			continue
 		}
-		if stat.ModTime().After(mtime) {
-			LoadProxies()
-			logger.Info("Reloaded %d proxies automatically (proxy.txt changed)", len(proxies))
+		h := fmt.Sprintf("%x", sha256.Sum256(data))
+		if h == prevHash {
+			continue
 		}
+		prevHash = h
+		LoadProxies()
+		logger.Info("Reloaded %d proxies automatically (proxy.txt changed)", len(proxies))
 	}
 }
 
@@ -134,7 +139,6 @@ func PickProxies(n int, exclude map[string]bool) []string {
 	pinned := top[:pinCount]
 	rest := top[pinCount:]
 
-	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(rest), func(i, j int) {
 		rest[i], rest[j] = rest[j], rest[i]
 	})
@@ -294,4 +298,10 @@ func GetRealIP() (string, error) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	return strings.TrimSpace(string(body)), nil
+}
+
+func GetVPSIP() string {
+	mu.RLock()
+	defer mu.RUnlock()
+	return vpsIP
 }

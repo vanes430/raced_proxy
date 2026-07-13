@@ -1,6 +1,6 @@
-# 🔄 Go Proxy Tool (Scanner & Rotator)
+# 🔄 Raced Proxy (Scanner & Rotator)
 
-Fast proxy checker + rotating proxy server built with **Golang**. Runs high-concurrency checks using native goroutines, performs triple-stage verification, and races multiple proxies simultaneously to return the fastest response.
+Fast proxy checker + racing proxy server built with **Golang**. Runs high-concurrency checks using native goroutines, performs triple-stage verification, and races multiple proxies simultaneously to return the fastest response.
 
 ## Features
 
@@ -24,13 +24,13 @@ Fast proxy checker + rotating proxy server built with **Golang**. Runs high-conc
 
 ```bash
 # 1. Compile the tool
-go build -o proxy cmd/proxy/main.go
+go build -o raced_proxy cmd/raced_proxy/main.go
 
 # 2. Run the proxy scanner to generate proxy.txt
-./proxy scan
+./raced_proxy scan
 
 # 3. Run the rotator server
-./proxy rotate
+./raced_proxy rotate
 ```
 
 ## Usage
@@ -39,14 +39,14 @@ go build -o proxy cmd/proxy/main.go
 Fetches free proxies from multiple sources, runs them through the 3-stage validation, and saves working ones to `proxy.txt`.
 
 ```bash
-./proxy scan
+./raced_proxy scan
 ```
 
 ### Proxy Rotator (`rotate` mode)
 Runs a local proxy server that races proxies per request and returns the fastest.
 
 ```bash
-./proxy rotate
+./raced_proxy rotate
 
 # Test it with curl:
 curl -x http://127.0.0.1:8090 https://ifconfig.me/ip
@@ -73,10 +73,10 @@ Customize parameters inside the `.env` file:
 ## Architecture
 
 ```
-cmd/proxy/main.go     → CLI dispatcher (scan / rotate commands)
-internal/config/      → Configuration parser (.env)
-internal/logger/      → Colorful console logging system
-internal/proxy/       → Pool state tracker, CLI engine, and stats management
-internal/scanner/     → Triple stage checker routines
-internal/rotator/     → Multi-threaded TCP bridge server and racing engines
+cmd/raced_proxy/main.go → CLI dispatcher (scan / rotate commands)
+internal/config/        → Configuration parser (.env)
+internal/logger/        → Colorful console logging system
+internal/proxy/         → Pool state tracker, CLI engine, and stats management
+internal/scanner/       → Triple stage checker routines
+internal/rotator/       → Multi-threaded TCP bridge server and racing engines
 ```

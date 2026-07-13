@@ -13,6 +13,7 @@ const (
 	Red     = "\x1b[31m"
 	Green   = "\x1b[32m"
 	Yellow  = "\x1b[33m"
+	Blue    = "\x1b[34m"
 	Magenta = "\x1b[35m"
 	Cyan    = "\x1b[36m"
 	White   = "\x1b[37m"
@@ -50,4 +51,15 @@ func Banner(title string, rows ...string) {
 		fmt.Printf("  %s\n", r)
 	}
 	fmt.Println(hr)
+}
+
+func ShowBanner(version string) {
+	b := Blue + Bold
+	r := Reset
+	fmt.Println()
+	fmt.Printf("%s▄▄▄▄▄▄▄ ▄▄▄▄▄▄▄ ▄▄▄▄▄▄▄ ▄▄▄ ▄▄▄ ▄▄▄ ▄▄▄%s\n", b, r)
+	fmt.Printf("%s█ ▄▄▄ █ █ ▄▄▄ █ █ ▄▄▄ █ █▄▀█▀▄█ █▄▀█▀▄█%s\n", b, r)
+	fmt.Printf("%s█ ▄▄▄▄█ █ ▄ ▄▄█ █ █▄█ █ ▄█▀▄▀█▄  ▀█ █▀%s\n", b, r)
+	fmt.Printf("%s█▄█     █▄█▄▄▄█ █▄▄▄▄▄█ █▄█▀█▄█   █▄█  %s\n", b, r)
+	fmt.Printf("\n  %sv%s%s  |  %shttps://github.com/vanes430/raced_proxy%s\n\n", Gray, version, Reset, Blue, Reset)
 }
