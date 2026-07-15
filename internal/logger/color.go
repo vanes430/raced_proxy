@@ -63,3 +63,11 @@ func ShowBanner(version string) {
 	fmt.Printf("%s█▄█     █▄█▄▄▄█ █▄▄▄▄▄█ █▄█▀█▄█   █▄█  %s\n", b, r)
 	fmt.Printf("\n  %sv%s%s  |  %shttps://github.com/vanes430/raced_proxy%s\n\n", Gray, version, Reset, Blue, Reset)
 }
+
+func Section(title string) {
+	fmt.Printf("\n%s━━━ %s %s ━━━%s\n", Bold+Blue, title, Bold+Blue, Reset)
+}
+
+func Divider() {
+	fmt.Println(Dim + strings.Repeat("─", 50) + Reset)
+}

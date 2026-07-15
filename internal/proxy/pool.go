@@ -67,6 +67,8 @@ func LoadProxies() {
 	if err == nil {
 		mtime = stat.ModTime()
 	}
+
+	logger.Info("Loaded %d proxies from %s", len(list), proxyFile)
 }
 
 func WatchProxyFile() {
@@ -160,7 +162,8 @@ func RemoveSlowProxies(candidates []string, attempts int, totalMs int, maxLatenc
 	for _, p := range slow {
 		failures[p] += 2
 	}
-	logger.Warn("Penalized %d slow proxies (+2 failures each)", len(slow))
+	logger.Warn("Slow proxies penalized: %d proxies (+2 failures each)", len(slow))
+	logger.Warn("Total race time: %dms (max: %dms) — proxies slower than winner penalized", totalMs, maxLatency)
 }
 
 func RecordWin(proxyStr string, attempts int, winnerTTL int, winnerCooldown int) {
@@ -179,17 +182,22 @@ func RecordWin(proxyStr string, attempts int, winnerTTL int, winnerCooldown int)
 		winners[proxyStr] = 100
 	}
 
+	logger.Info("Winner score update: %s +%d points (total: %d)", proxyStr, bonus, winners[proxyStr])
+
 	for p, score := range winners {
 		if p != proxyStr {
+			prev := winners[p]
 			winners[p] = int(float64(score) * 0.5)
+			logger.Info("Score decay: %s %d → %d (halved)", p, prev, winners[p])
 		}
 	}
 
 	usage[proxyStr]++
+	logger.Info("Usage count: %s used %d/%d times", proxyStr, usage[proxyStr], winnerTTL)
 	if usage[proxyStr] >= winnerTTL {
 		usage[proxyStr] = 0
 		cooldown[proxyStr] = winnerCooldown
-		fmt.Printf("  %s⏳%s %s hit winner TTL → cooling down for %d request runs\n", logger.Yellow, logger.Reset, proxyStr, winnerCooldown)
+		logger.Warn("Winner cooldown: %s reached TTL → cooling for %d requests", proxyStr, winnerCooldown)
 	}
 }
 
@@ -197,6 +205,7 @@ func RecordFail(proxyStr string) {
 	mu.Lock()
 	defer mu.Unlock()
 	failures[proxyStr]++
+	logger.Warn("Failure recorded: %s (total: %d)", proxyStr, failures[proxyStr])
 }
 
 func TickCooldowns() {
@@ -211,27 +220,56 @@ func TickCooldowns() {
 	}
 }
 
+var (
+	persistCh = make(chan struct{}, 1)
+	persistMu sync.Mutex
+)
+
+func init() {
+	go persistLoop()
+}
+
+func persistLoop() {
+	for range persistCh {
+		time.Sleep(200 * time.Millisecond) // debounce: tunggu 200ms sebelum nulis
+		mu.RLock()
+		var buf bytes.Buffer
+		for _, p := range proxies {
+			buf.WriteString(p + "\n")
+		}
+		f := proxyFile
+		mu.RUnlock()
+		_ = os.WriteFile(f, buf.Bytes(), 0644)
+	}
+}
+
+func triggerPersist() {
+	select {
+	case persistCh <- struct{}{}:
+	default: // already queued
+	}
+}
+
 func DeleteProxy(proxyStr string) {
 	mu.Lock()
-	defer mu.Unlock()
-
-	var fresh []string
-	for _, p := range proxies {
-		if p != proxyStr {
-			fresh = append(fresh, p)
+	// Hapus pake map biar O(1)
+	idx := -1
+	for i, p := range proxies {
+		if p == proxyStr {
+			idx = i
+			break
 		}
 	}
-	proxies = fresh
+	if idx >= 0 {
+		proxies = append(proxies[:idx], proxies[idx+1:]...)
+	}
 	delete(failures, proxyStr)
 	delete(winners, proxyStr)
 	delete(usage, proxyStr)
 	delete(cooldown, proxyStr)
+	mu.Unlock()
 
-	var buf bytes.Buffer
-	for _, p := range proxies {
-		buf.WriteString(p + "\n")
-	}
-	_ = os.WriteFile(proxyFile, buf.Bytes(), 0644)
+	triggerPersist() // async, gak blocking
 }
 
 func GetStats() (int, int, int, int) {

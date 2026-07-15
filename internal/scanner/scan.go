@@ -52,55 +52,89 @@ func RunScanner() {
 		fmt.Sprintf("Output:       %s", outputFile),
 	)
 
-	logger.Info("Detecting real VPS IP...")
+	// ---- VPS IP Detection ----
+	logger.Section("VPS IP DETECTION")
+	logger.Info("Detecting real VPS IP by contacting ifconfig.me...")
 	ip, err := proxy.GetRealIP()
 	if err == nil && ip != "" {
 		realIP = ip
-		logger.Ok("VPS IP: %s", realIP)
+		logger.Ok("VPS IP detected: %s", realIP)
+		logger.Info("Proxies that leak this IP will be filtered out in Stage 1")
 	} else {
-		logger.Info("Could not detect VPS IP. Leak detection disabled.")
+		logger.Info("Could not detect VPS IP — leak detection disabled.")
+		logger.Info("Reason: %v", err)
 	}
+	logger.Divider()
 
-	logger.Info("Fetching free proxy lists...")
+	// ---- Fetch Proxies ----
+	logger.Section("FETCHING PROXY SOURCES")
+	logger.Info("Reading proxy source URLs from url-list.txt...")
 	allProxies, sources := fetchAllProxies()
-	logger.Ok("Total unique proxies: %d", len(allProxies))
-	fmt.Println()
-
 	if len(allProxies) == 0 {
-		logger.Fail("No proxies found.")
+		logger.Fail("No proxies fetched from any source.")
+		logger.Info("Check url-list.txt and network connectivity.")
 		return
 	}
+	logger.Ok("Total unique proxies collected: %d", len(allProxies))
+	logger.Info("Proxy sources: %d sources contributed to the pool", len(sources))
+	logger.Divider()
 
 	start := time.Now()
 
-	// Tahap 1: Deteksi IP Leak
+	// ---- Stage 1: IP Leak Detection ----
+	logger.Section("STAGE 1: IP LEAK DETECTION")
+	logger.Info("Checking %d proxies against ifconfig.me via CONNECT + TLS...", len(allProxies))
+	logger.Info("Goal: Eliminate transparent proxies that expose the VPS IP")
+	stage1Start := time.Now()
 	stage1Passed := runStage1(allProxies, concurrencyLimit, timeoutMs)
-	logger.Ok("Stage 1 Complete: %d proxies passed.\n", len(stage1Passed))
+	stage1Elapsed := time.Since(stage1Start)
+	stage1Fail := len(allProxies) - len(stage1Passed)
+	logger.Divider()
+	logger.Ok("Stage 1 Result — Passed: %d | Failed: %d | Time: %.1fs", len(stage1Passed), stage1Fail, stage1Elapsed.Seconds())
 	if len(stage1Passed) == 0 {
-		logger.Fail("No proxies passed Stage 1.")
+		logger.Fail("All proxies failed IP leak detection. No usable proxies.")
 		_ = os.WriteFile(outputFile, []byte(""), 0644)
 		return
 	}
+	fmt.Println()
 
-	// Tahap 2: Tes akses target
+	// ---- Stage 2: Target Accessibility ----
+	logger.Section("STAGE 2: TARGET ACCESSIBILITY")
+	logger.Info("Testing %d proxies against opencode.ai...", len(stage1Passed))
+	logger.Info("Goal: Drop proxies that return 403/429 or are blocked by the target")
+	stage2Start := time.Now()
 	stage2Passed := runStage2(stage1Passed, concurrencyLimit, timeoutMs)
-	logger.Ok("Stage 2 Complete: %d proxies passed.\n", len(stage2Passed))
+	stage2Elapsed := time.Since(stage2Start)
+	stage2Fail := len(stage1Passed) - len(stage2Passed)
+	logger.Divider()
+	logger.Ok("Stage 2 Result — Passed: %d | Failed: %d | Time: %.1fs", len(stage2Passed), stage2Fail, stage2Elapsed.Seconds())
 	if len(stage2Passed) == 0 {
-		logger.Fail("No proxies passed Stage 2.")
+		logger.Fail("All proxies blocked or inaccessible to the target.")
 		_ = os.WriteFile(outputFile, []byte(""), 0644)
 		return
 	}
+	fmt.Println()
 
-	// Tahap 3: Uji kestabilan
+	// ---- Stage 3: Stability Check ----
+	logger.Section("STAGE 3: STABILITY CHECK")
+	logger.Info("Re-testing %d proxies after 100ms delay...", len(stage2Passed))
+	logger.Info("Goal: Filter out single-use / unstable proxies")
+	stage3Start := time.Now()
 	working := runStage3(stage2Passed, concurrencyLimit, timeoutMs, maxLatencyMs)
+	stage3Elapsed := time.Since(stage3Start)
+	stage3Fail := len(stage2Passed) - len(working)
+	logger.Divider()
+	logger.Ok("Stage 3 Result — Passed: %d | Failed: %d | Time: %.1fs", len(working), stage3Fail, stage3Elapsed.Seconds())
+	fmt.Println()
 
+	// ---- Dedup ----
 	working = dedupByIP(working)
 
 	sort.Slice(working, func(i, j int) bool {
 		return working[i].Ms < working[j].Ms
 	})
 
-	elapsed := time.Since(start).Seconds()
+	elapsed := time.Since(start)
 
 	var buf bytes.Buffer
 	for _, w := range working {
@@ -108,16 +142,19 @@ func RunScanner() {
 	}
 	_ = os.WriteFile(outputFile, buf.Bytes(), 0644)
 
-	fmt.Println(logger.Dim + strings.Repeat("─", 50) + logger.Reset)
+	// ---- Final Summary ----
+	logger.Section("SCAN COMPLETE")
+	fmt.Println()
 	if len(working) == 0 {
-		logger.Fail("No working proxies found")
+		logger.Fail("No working proxies found after all 3 stages.")
 	} else {
 		sum := 0
 		for _, w := range working {
 			sum += w.Ms
 		}
 		avg := sum / len(working)
-		logger.Ok("%d fast proxies (avg %dms, %.1fs) → %s\n", len(working), avg, elapsed, outputFile)
+		logger.Ok("Working proxies: %d | Average latency: %dms | Total time: %.1fs", len(working), avg, elapsed.Seconds())
+		logger.Ok("Results written to: %s", outputFile)
 
 		fmt.Printf("\n%s  Source Success Rates%s\n\n", logger.Bold, logger.Reset)
 		workingMap := make(map[string]bool)
@@ -144,10 +181,16 @@ func RunScanner() {
 			fmt.Printf("  %-30s %d/%d (%s%.1f%%%s)\n", src.Name, success, src.Fetched, color, pct, logger.Reset)
 		}
 	}
+
+	// ---- Pipeline Summary ----
+	fmt.Println()
+	logger.Divider()
+	logger.Info("Pipeline summary: %d fetched → %d stage1 → %d stage2 → %d stage3 → %d final",
+		len(allProxies), len(stage1Passed), len(stage2Passed), len(working), len(working))
+	logger.Divider()
 }
 
 func runStage1(proxiesList []string, concurrencyLimit int, timeoutMs int) []string {
-	logger.Info("Running Stage 1 (Leak-free check) on %d proxies...", len(proxiesList))
 	var passed []string
 	var muLock sync.Mutex
 	var completed int64
@@ -175,7 +218,9 @@ func runStage1(proxiesList []string, concurrencyLimit int, timeoutMs int) []stri
 			curr := atomic.AddInt64(&completed, 1)
 			if curr%100 == 0 || curr == int64(len(proxiesList)) {
 				muLock.Lock()
-				logger.Info("Stage 1 Progress: %d/%d checked | Passed: %d", curr, len(proxiesList), len(passed))
+				pct := float64(curr) / float64(len(proxiesList)) * 100
+				logger.Info("Stage 1 Progress: [%d/%d] %.0f%% — Passed: %d | Failed: %d",
+					curr, len(proxiesList), pct, len(passed), curr-int64(len(passed)))
 				muLock.Unlock()
 			}
 		}(proxyVal)
@@ -186,7 +231,6 @@ func runStage1(proxiesList []string, concurrencyLimit int, timeoutMs int) []stri
 }
 
 func runStage2(proxiesList []string, concurrencyLimit int, timeoutMs int) []string {
-	logger.Info("Running Stage 2 (Target opencode.ai check) on %d proxies...", len(proxiesList))
 	var passed []string
 	var muLock sync.Mutex
 	var completed int64
@@ -214,7 +258,9 @@ func runStage2(proxiesList []string, concurrencyLimit int, timeoutMs int) []stri
 			curr := atomic.AddInt64(&completed, 1)
 			if curr%10 == 0 || curr == int64(len(proxiesList)) {
 				muLock.Lock()
-				logger.Info("Stage 2 Progress: %d/%d checked | Passed: %d", curr, len(proxiesList), len(passed))
+				pct := float64(curr) / float64(len(proxiesList)) * 100
+				logger.Info("Stage 2 Progress: [%d/%d] %.0f%% — Passed: %d | Failed: %d",
+					curr, len(proxiesList), pct, len(passed), curr-int64(len(passed)))
 				muLock.Unlock()
 			}
 		}(proxyVal)
@@ -225,7 +271,6 @@ func runStage2(proxiesList []string, concurrencyLimit int, timeoutMs int) []stri
 }
 
 func runStage3(proxiesList []string, concurrencyLimit int, timeoutMs int, maxLatencyMs int) []CheckResult {
-	logger.Info("Running Stage 3 (Stability double check) on %d proxies...", len(proxiesList))
 	var passed []CheckResult
 	var muLock sync.Mutex
 	var completed int64
@@ -259,7 +304,9 @@ func runStage3(proxiesList []string, concurrencyLimit int, timeoutMs int, maxLat
 			curr := atomic.AddInt64(&completed, 1)
 			if curr%10 == 0 || curr == int64(len(proxiesList)) {
 				muLock.Lock()
-				logger.Info("Stage 3 Progress: %d/%d checked | Passed: %d", curr, len(proxiesList), len(passed))
+				pct := float64(curr) / float64(len(proxiesList)) * 100
+				logger.Info("Stage 3 Progress: [%d/%d] %.0f%% — Passed: %d | Failed: %d",
+					curr, len(proxiesList), pct, len(passed), curr-int64(len(passed)))
 				muLock.Unlock()
 			}
 		}(proxyVal)
@@ -271,9 +318,9 @@ func runStage3(proxiesList []string, concurrencyLimit int, timeoutMs int, maxLat
 
 func dedupByIP(results []CheckResult) []CheckResult {
 	type entry struct {
-		proxy CheckResult
-		ip    string
-		port  int
+		proxy      CheckResult
+		ip         string
+		port       int
 		commonPort bool
 	}
 
@@ -298,6 +345,7 @@ func dedupByIP(results []CheckResult) []CheckResult {
 	}
 
 	var deduped []CheckResult
+	dupCount := 0
 	for _, group := range ipGroups {
 		if len(group) == 1 {
 			deduped = append(deduped, group[0].proxy)
@@ -328,9 +376,10 @@ func dedupByIP(results []CheckResult) []CheckResult {
 			}
 			deduped = append(deduped, best.proxy)
 		}
+		dupCount += len(group) - 1
 	}
 
-	logger.Ok("Dedup by IP: %d → %d (removed %d duplicates)", len(results), len(deduped), len(results)-len(deduped))
+	logger.Ok("Dedup by IP: %d → %d (removed %d same-IP duplicates)", len(results), len(deduped), dupCount)
 	return deduped
 }
 
@@ -464,6 +513,9 @@ func fetchAllProxies() ([]string, []SourceData) {
 		}
 	}
 
+	logger.Info("Found %d proxy source URLs in url-list.txt", len(sources))
+	fmt.Println()
+
 	var results []SourceData
 	allSet := make(map[string]bool)
 
@@ -487,8 +539,11 @@ func fetchAllProxies() ([]string, []SourceData) {
 				name = name[:40]
 			}
 
+			fetchStart := time.Now()
 			resp, err := client.Get(targetURL)
+			fetchElapsed := time.Since(fetchStart)
 			if err != nil {
+				logger.Warn("Fetch failed: %s — %v (%.1fs)", name, err, fetchElapsed.Seconds())
 				return
 			}
 			defer resp.Body.Close()
@@ -518,12 +573,14 @@ func fetchAllProxies() ([]string, []SourceData) {
 			for _, p := range proxiesList {
 				allSet[p] = true
 			}
-			fmt.Printf("✓ %d proxies from %s\n", len(proxiesList), name)
+			fmt.Printf("  %s✓%s %-40s %d proxies (%.1fs)%s\n",
+				logger.Green, logger.Reset, name, len(proxiesList), fetchElapsed.Seconds(), logger.Reset)
 			muLock.Unlock()
 		}(url)
 	}
 
 	wg.Wait()
+	fmt.Println()
 
 	var allList []string
 	for p := range allSet {
