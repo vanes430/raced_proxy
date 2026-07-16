@@ -28,8 +28,8 @@ func StartCLI() {
 			fmt.Printf("\x1b[37mDeleted proxy %s manually.\x1b[0m\n", parts[1])
 
 		case "status", "stat":
-			total, active, cooling, banned := GetStats()
-			fmt.Printf("Total: %d | Active: \x1b[32m%d\x1b[0m | Cooling: \x1b[33m%d\x1b[0m | Banned: \x1b[31m%d\x1b[0m\n", total, active, cooling, banned)
+			total, winners := GetStats()
+			fmt.Printf("Total: %d | Winners: \x1b[32m%d\x1b[0m\n", total, winners)
 
 		case "top":
 			limit := 10
@@ -45,16 +45,16 @@ func StartCLI() {
 			fmt.Printf("Reloaded proxy file manually. Total: %d proxies\n", GetProxiesCount())
 
 		case "reset":
-			ResetStats()
-			fmt.Println("All proxy scores and stats reset successfully.")
+			ResetWinners()
+			fmt.Println("Winners reset.")
 
 		case "help":
 			fmt.Println(`
   del <ip:port>   Remove a proxy
-  status          Pool stats (active/cooling/banned)
-  top [n]         Top N winning proxies (default: 10)
+  status          Pool stats
+  top [n]         Top N winners (default: 10)
   reload          Force reload proxy.txt
-  reset           Reset all stats and cooldowns
+  reset           Reset winners
   help            Show this help`)
 
 		default:
