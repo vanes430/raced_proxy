@@ -1,47 +1,29 @@
-# dependencies (bun install)
-node_modules
-
-# output
-out
-dist
-*.tgz
-
-# code coverage
-coverage
-*.lcov
-
-# logs
-logs
-_.log
-report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
-
-# dotenv environment variable files
+# dotenv
 .env
-.env.development.local
-.env.test.local
-.env.production.local
-.env.local
 
-# caches
-.eslintcache
-.cache
-*.tsbuildinfo
-
-# IntelliJ based IDEs
-.idea
-
-# Finder (MacOS) folder config
-.DS_Store
+# proxy pool
 proxy.txt
-aaa.txt
-.ua
+
+# rate-limit archive
+proxy_bekas/
+
+# opencode session state
+.omo/
+
+# understand agent artifacts
+.ua/
 
 # Go binaries
-/scanner
-/rotator
-/raced_proxy
+raced_proxy
 raced_proxy.exe
-/proxy
 
 # IDE
 .opencode/
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# temp
+*.tmp
