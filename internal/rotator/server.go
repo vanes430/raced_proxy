@@ -1,16 +1,11 @@
 package rotator
 
 import (
-	"bytes"
-	"context"
-	"crypto/tls"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"os/signal"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,49 +17,53 @@ import (
 	"raced_proxy/internal/proxy"
 )
 
-type RaceResult struct {
-	Conn     net.Conn
-	Rest     []byte
-	Proxy    string
-	Attempts int
-}
-
 func RunRotator() {
 	port := config.GetEnvInt("PORT", 8090)
-	raceCount := config.GetEnvInt("RACE", 20)
-	staggerMs := config.GetEnvInt("STAGGER", 20)
-	winnerTTL := config.GetEnvInt("WINNER_TTL", 10)
-	winnerCooldown := config.GetEnvInt("WINNER_COOLDOWN", 20)
-	maxLatencyMs := config.GetEnvInt("MAX_LATENCY", 1500)
 	outputFile := config.GetEnv("OUTPUT", "proxy.txt")
 	proxyUser := config.GetEnv("PROXY_USER", "")
 	proxyPass := config.GetEnv("PROXY_PASS", "")
 
-	logger.Info("Initializing rotator with config...")
-	logger.Info("Port: %d | Race: %d | Stagger: %dms | MaxLatency: %dms", port, raceCount, staggerMs, maxLatencyMs)
-	logger.Info("Winner TTL: %d | Winner Cooldown: %d | Proxy file: %s", winnerTTL, winnerCooldown, outputFile)
+	logger.Info("Initializing rotator...")
+	logger.Info("Port: %d | Proxy file: %s", port, outputFile)
 
-	var vpsIP string
+	vpsIP := ""
 	ip, err := proxy.GetRealIP()
 	if err == nil {
 		vpsIP = ip
-		logger.Info("VPS IP detected: %s", vpsIP)
+		logger.Info("VPS IP: %s", vpsIP)
 	} else {
 		logger.Warn("VPS IP detection failed: %v", err)
 	}
 
-	logger.Info("Loading proxy pool from %s...", outputFile)
 	proxy.InitPool(outputFile, vpsIP)
 	if proxy.GetProxiesCount() == 0 {
-		logger.Fail("No proxies found in %s. Run checker first.", outputFile)
-		logger.Info("Run: ./raced_proxy scan")
+		logger.Fail("No proxies found. Run scanner first.")
 		os.Exit(1)
 	}
-	logger.Ok("Proxy pool loaded: %d proxies", proxy.GetProxiesCount())
+	logger.Ok("Proxy pool: %d loaded", proxy.GetProxiesCount())
+
+	logger.Info("Bootstrapping top winners...")
+	proxy.Bootstrap(func(p string) (bool, int) {
+		t0 := time.Now()
+		status, _ := targetCheck(p, "opencode.ai", 443)
+		ms := int(time.Since(t0).Milliseconds())
+		if status == 200 {
+			logger.Ok("bootstrap OK %s (%dms)", p, ms)
+			return true, ms
+		}
+		if status == 429 || status == 403 {
+			logger.Warn("bootstrap BLOCKED %d %s (%dms)", status, p, ms)
+			proxy.ArchiveRateLimited(p)
+		} else {
+			logger.Fail("bootstrap FAIL %s (http:%d %dms)", p, status, ms)
+			proxy.DeleteProxy(p)
+		}
+		return false, 0
+	})
 
 	go proxy.WatchProxyFile()
 	go proxy.StartCLI()
-	logger.Info("File watcher and CLI console started")
+	logger.Info("File watcher and CLI started")
 
 	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port))
 	if err != nil {
@@ -79,17 +78,18 @@ func RunRotator() {
 		authHeaderVal = "Basic " + base64.StdEncoding.EncodeToString([]byte(proxyUser+":"+proxyPass))
 	}
 
-	authStatusStr := "\x1b[31mnone\x1b[0m"
+	authStr := "\x1b[31mnone\x1b[0m"
 	if authEnabled {
-		authStatusStr = fmt.Sprintf("\x1b[32menabled\x1b[0m (%s)", proxyUser)
+		authStr = fmt.Sprintf("\x1b[32menabled\x1b[0m (%s)", proxyUser)
 	}
 
+	winners := proxy.GetTopWinners()
 	logger.Banner("PROXY ROTATOR",
 		fmt.Sprintf("Port:      %d", port),
 		fmt.Sprintf("VPS IP:    %s", vpsIP),
 		fmt.Sprintf("Proxies:   %d loaded", proxy.GetProxiesCount()),
-		fmt.Sprintf("Race:      %d per request", raceCount),
-		fmt.Sprintf("Auth:      %s", authStatusStr),
+		fmt.Sprintf("Winners:   %d", len(winners)),
+		fmt.Sprintf("Auth:      %s", authStr),
 		fmt.Sprintf("Command:   curl -x http://127.0.0.1:%d https://ifconfig.me/ip", port),
 		"CLI:       Type 'help' for runtime commands",
 	)
@@ -100,7 +100,7 @@ func RunRotator() {
 	var activeConns sync.WaitGroup
 	go func() {
 		<-sigCh
-		logger.Info("Shutting down rotator...")
+		logger.Info("Shutting down...")
 		listener.Close()
 	}()
 
@@ -112,7 +112,7 @@ func RunRotator() {
 		activeConns.Add(1)
 		go func() {
 			defer activeConns.Done()
-			handleClient(clientConn, authEnabled, authHeaderVal, raceCount, staggerMs, maxLatencyMs, winnerTTL, winnerCooldown)
+			handleClient(clientConn, authEnabled, authHeaderVal)
 		}()
 	}
 
@@ -120,7 +120,7 @@ func RunRotator() {
 	logger.Info("Rotator stopped.")
 }
 
-func handleClient(client net.Conn, authEnabled bool, authHeaderVal string, raceCount int, staggerMs int, maxLatencyMs int, winnerTTL int, winnerCooldown int) {
+func handleClient(client net.Conn, authEnabled bool, authHeaderVal string) {
 	defer client.Close()
 
 	buf := make([]byte, 4096)
@@ -143,11 +143,7 @@ func handleClient(client net.Conn, authEnabled bool, authHeaderVal string, raceC
 	}
 	method := parts[0]
 	target := parts[1]
-
 	from := client.RemoteAddr().String()
-	logger.Section("CONNECTION ← " + from)
-	logger.Info("Method: %s | Target: %s", method, target)
-	logger.Info("Auth: %v", authEnabled)
 
 	if authEnabled {
 		authorized := false
@@ -161,24 +157,22 @@ func handleClient(client net.Conn, authEnabled bool, authHeaderVal string, raceC
 			}
 		}
 		if !authorized {
-			logger.Warn("AUTH FAIL ← %s", from)
-			logger.Warn("Authentication required but no valid Proxy-Authorization header found")
-			logger.Info("Sending 407 Proxy Authentication Required response")
+			logger.Warn("← %s %s %s — AUTH FAIL", from, method, target)
 			_, _ = client.Write([]byte("HTTP/1.1 407\r\nProxy-Authenticate: Basic realm=\"proxy\"\r\n\r\n"))
 			return
-		} else {
-			logger.Ok("AUTH OK ← %s", from)
 		}
 	}
 
+	logger.Section(fmt.Sprintf("← %s %s %s", from, method, target))
+
 	if method == "CONNECT" {
-		onCONNECT(client, target, from, raceCount, staggerMs, maxLatencyMs, winnerTTL, winnerCooldown)
+		onCONNECT(client, target, from)
 	} else {
-		onHTTP(client, buf[:n], from, raceCount, staggerMs, maxLatencyMs, winnerTTL, winnerCooldown)
+		onHTTP(client, buf[:n], from)
 	}
 }
 
-func onCONNECT(client net.Conn, target string, from string, raceCount int, staggerMs int, maxLatencyMs int, winnerTTL int, winnerCooldown int) {
+func onCONNECT(client net.Conn, target, from string) {
 	host, portStr, err := net.SplitHostPort(target)
 	if err != nil {
 		host = target
@@ -186,429 +180,120 @@ func onCONNECT(client net.Conn, target string, from string, raceCount int, stagg
 	}
 	port, _ := strconv.Atoi(portStr)
 
-	logger.Info("CONNECT target: %s:%d", host, port)
-	logger.Info("Race config: %d proxies | %dms stagger | max %d attempts", raceCount, staggerMs, 15)
-
-	tried := make(map[string]bool)
-	attempt := 0
-	var winner *RaceResult
-
-	for attempt < 15 {
-		cands := proxy.PickProxies(raceCount, tried)
-		if len(cands) == 0 {
-			logger.Warn("CONNECT %s:%d — no more candidates (attempt %d)", host, port, attempt+1)
+	for attempt := 0; attempt < 15; attempt++ {
+		p := proxy.PickTopWinner()
+		if p == "" {
+			logger.Warn("No top winner available")
 			break
 		}
-		for _, p := range cands {
-			tried[p] = true
-		}
-		attempt++
-
-		logger.Info("CONNECT attempt %d/15 — racing %d proxies...", attempt, len(cands))
 
 		t0 := time.Now()
-		res := raceCONNECT(host, port, cands, staggerMs)
-		raceMs := time.Since(t0).Milliseconds()
+		status, respID := targetCheck(p, host, port)
+		ms := int(time.Since(t0).Milliseconds())
 
-		if res == nil {
-			logger.Warn("CONNECT %s:%d — attempt %d: all %d proxies failed (%.0fms)", host, port, attempt, len(cands), float64(raceMs))
+		if status != 200 {
+			if status == 429 || status == 403 {
+				logger.Warn("BLOCKED %d %s (%dms)", status, p, ms)
+				proxy.ArchiveRateLimited(p)
+			} else {
+				logger.Warn("FAILED %s (%dms)", p, ms)
+				proxy.RemoveWinner(p)
+			}
+			triggerRefill()
 			continue
 		}
 
-		logger.Ok("CONNECT %s:%d — proxy %s won the race (attempt %d/%d, %.0fms)", host, port, res.Proxy, res.Attempts, len(cands), float64(raceMs))
-
-		t1 := time.Now()
-		ok := fastCheck(res.Proxy)
-		checkMs := time.Since(t1).Milliseconds()
-
-		if !ok {
-			logger.Warn("CONNECT %s:%d via %s — fast check FAILED (%dms)", host, port, res.Proxy, checkMs)
-			logger.Warn("Fast check failure: proxy may be leaking IP or timed out")
-			proxy.RecordFail(res.Proxy)
-			res.Conn.Close()
+		conn, err := net.DialTimeout("tcp", p, 6*time.Second)
+		if err != nil {
+			logger.Warn("dial FAIL %s", p)
+			proxy.RemoveWinner(p)
 			continue
 		}
-		logger.Ok("Fast check PASSED for %s (%dms)", res.Proxy, checkMs)
 
-		// Pre-flight: test proxy against actual target via HTTP
-		t2 := time.Now()
-		status := targetCheck(res.Proxy, host, port)
-		targetMs := time.Since(t2).Milliseconds()
-		if status == 429 || status == 403 {
-			logger.Warn("CONNECT %s:%d via %s — target returned %d, deleting proxy...", host, port, res.Proxy, status)
-			logger.Warn("Target blocked status %d — proxy removed from pool", status)
-			proxy.DeleteProxy(res.Proxy)
-			res.Conn.Close()
+		req := fmt.Sprintf("CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n\r\n", host, port, host, port)
+		_, err = conn.Write([]byte(req))
+		if err != nil {
+			conn.Close()
+			proxy.RemoveWinner(p)
 			continue
 		}
-		logger.Ok("Target check PASSED for %s (%dms, status %d)", res.Proxy, targetMs, status)
 
-		proxy.RemoveSlowProxies(cands, res.Attempts, int(raceMs), maxLatencyMs)
-		winner = res
+		resp := make([]byte, 1024)
+		conn.SetReadDeadline(time.Now().Add(6 * time.Second))
+		n, err := conn.Read(resp)
+		conn.SetReadDeadline(time.Time{})
+		if err != nil || !strings.Contains(string(resp[:n]), "200") {
+			conn.Close()
+			proxy.RemoveWinner(p)
+			continue
+		}
 
-		logger.Ok("CONNECT %s:%d → winner %s (race: %dms | fast: %dms | target: %dms | pos: %d/%d)", host, port, res.Proxy, raceMs, checkMs, targetMs, res.Attempts, len(cands))
-		break
-	}
-
-	if winner == nil {
-		logger.Fail("CONNECT %s:%d — ALL FAILED after %d attempts (%d proxies tried)", host, port, attempt, len(tried))
-		logger.Fail("Returning 502 Bad Gateway to %s", from)
-		_, _ = client.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		logger.Ok("proxy %s (ms:%d id:%s)", p, ms, respID)
+		_, _ = client.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+		logger.Info("tunnel open → bridging %s ↔ %s:%d", from, host, port)
+		tunnelAndBridge(client, conn, p, host, port)
 		return
 	}
-	defer winner.Conn.Close()
 
-	_, _ = client.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
-	if len(winner.Rest) > 0 {
-		_, _ = client.Write(winner.Rest)
-	}
-
-	proxy.RecordWin(winner.Proxy, winner.Attempts, winnerTTL, winnerCooldown)
-	proxy.TickCooldowns()
-
-	logger.Info("CONNECT tunnel established → bridging %s ↔ %s:%d", from, host, port)
-	bridge(client, winner.Conn)
-	logger.Info("CONNECT tunnel closed: %s -> %s:%d", from, host, port)
+	_, _ = client.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+	logger.Fail("ALL FAILED")
 }
 
-func onHTTP(client net.Conn, firstChunk []byte, from string, raceCount int, staggerMs int, maxLatencyMs int, winnerTTL int, winnerCooldown int) {
-	tried := make(map[string]bool)
-	attempt := 0
-	var winner *RaceResult
-	var buffered []byte
-
-	logger.Info("HTTP proxy request from %s", from)
-	logger.Info("Race config: %d proxies | %dms stagger | max %d attempts", raceCount, staggerMs, 15)
-
-	for attempt < 15 {
-		cands := proxy.PickProxies(raceCount, tried)
-		if len(cands) == 0 {
-			logger.Warn("HTTP — no more candidates (attempt %d)", attempt+1)
+func onHTTP(client net.Conn, firstChunk []byte, from string) {
+	for attempt := 0; attempt < 15; attempt++ {
+		p := proxy.PickTopWinner()
+		if p == "" {
 			break
 		}
-		for _, p := range cands {
-			tried[p] = true
-		}
-		attempt++
 
-		logger.Info("HTTP attempt %d/15 — racing %d proxies...", attempt, len(cands))
-
-		t0 := time.Now()
-		res := raceHTTP(firstChunk, cands, staggerMs)
-		raceMs := time.Since(t0).Milliseconds()
-
-		if res == nil {
-			logger.Warn("HTTP attempt %d: all %d proxies failed (%.0fms)", attempt, len(cands), float64(raceMs))
+		conn, err := net.DialTimeout("tcp", p, 6*time.Second)
+		if err != nil {
+			proxy.RemoveWinner(p)
 			continue
 		}
 
-		logger.Ok("HTTP — proxy %s won the race (attempt %d/%d, %.0fms)", res.Proxy, res.Attempts, len(cands), float64(raceMs))
+		_, err = conn.Write(firstChunk)
+		if err != nil {
+			conn.Close()
+			proxy.RemoveWinner(p)
+			continue
+		}
 
-		proxy.RemoveSlowProxies(cands, res.Attempts, int(raceMs), maxLatencyMs)
-
-		status, bufPeek := peekStatus(res.Conn, 3000)
+		status, bufPeek := peekStatus(conn, 3000)
 		if status == 429 {
-			logger.Warn("HTTP via %s returned 429 (rate limited) — deleting", res.Proxy)
-			res.Conn.Close()
-			proxy.DeleteProxy(res.Proxy)
+			logger.Warn("BLOCKED 429 %s", p)
+			conn.Close()
+			proxy.ArchiveRateLimited(p)
 			continue
 		}
 
-		winner = res
-		buffered = bufPeek
-		logger.Ok("HTTP → winner %s (race: %dms | pos: %d/%d)", res.Proxy, raceMs, res.Attempts, len(cands))
-		break
-	}
+		logger.Ok("proxy %s", p)
 
-	if winner == nil {
-		logger.Fail("HTTP — ALL FAILED after %d attempts (%d proxies tried)", attempt, len(tried))
-		logger.Fail("Returning 502 Bad Gateway to %s", from)
-		_, _ = client.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		if len(bufPeek) > 0 {
+			_, _ = client.Write(bufPeek)
+		}
+		logger.Info("tunnel open → bridging %s", from)
+		tunnelAndBridge(client, conn, p, "", 0)
 		return
 	}
-	defer winner.Conn.Close()
 
-	if len(buffered) > 0 {
-		_, _ = client.Write(buffered)
-	}
-
-	proxy.RecordWin(winner.Proxy, winner.Attempts, winnerTTL, winnerCooldown)
-	proxy.TickCooldowns()
-
-	logger.Info("HTTP tunnel established → bridging %s ↔ target", from)
-	bridge(client, winner.Conn)
-	logger.Info("HTTP tunnel closed: %s", from)
+	_, _ = client.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+	logger.Fail("ALL FAILED")
 }
 
-func bridge(c1, c2 net.Conn) {
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		_, _ = io.Copy(c1, c2)
-		c1.Close()
-		c2.Close()
-		wg.Done()
-	}()
-	go func() {
-		_, _ = io.Copy(c2, c1)
-		c2.Close()
-		c1.Close()
-		wg.Done()
-	}()
-	wg.Wait()
-}
-
-func raceCONNECT(host string, port int, candidates []string, staggerMs int) *RaceResult {
-	var muLock sync.Mutex
-	var winner *RaceResult
-	var wg sync.WaitGroup
-	done := make(chan struct{})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	for idx, p := range candidates {
-		if idx > 0 {
-			select {
-			case <-done:
-				break
-			case <-time.After(time.Duration(staggerMs) * time.Millisecond):
+func triggerRefill() {
+	if proxy.NeedRefill() {
+		go proxy.Refill(20, func(p string) (bool, int) {
+			t0 := time.Now()
+			status, _ := targetCheck(p, "opencode.ai", 443)
+			ms := int(time.Since(t0).Milliseconds())
+			if status == 200 {
+				return true, ms
 			}
-		}
-
-		muLock.Lock()
-		if winner != nil {
-			muLock.Unlock()
-			break
-		}
-		muLock.Unlock()
-
-		wg.Add(1)
-		go func(proxyStr string, attemptNum int) {
-			defer wg.Done()
-
-			dialer := &net.Dialer{Timeout: 6 * time.Second}
-			conn, err := dialer.DialContext(ctx, "tcp", proxyStr)
-			if err != nil {
-				return
+			if status == 429 || status == 403 {
+				proxy.ArchiveRateLimited(p)
 			}
-
-			req := fmt.Sprintf("CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n\r\n", host, port, host, port)
-			_, err = conn.Write([]byte(req))
-			if err != nil {
-				conn.Close()
-				return
-			}
-
-			buf := make([]byte, 2048)
-			_ = conn.SetReadDeadline(time.Now().Add(6 * time.Second))
-			n, err := conn.Read(buf)
-			if err != nil {
-				conn.Close()
-				return
-			}
-			_ = conn.SetReadDeadline(time.Time{})
-
-			resp := string(buf[:n])
-			if !strings.Contains(resp, " 200") || strings.Contains(resp, " 429 ") || strings.Contains(resp, "429 Too Many") || strings.Contains(resp, "Rate limit") {
-				conn.Close()
-				return
-			}
-
-			muLock.Lock()
-			if winner == nil {
-				winner = &RaceResult{
-					Conn:     conn,
-					Proxy:    proxyStr,
-					Attempts: attemptNum,
-					Rest:     buf[strings.Index(resp, "\r\n\r\n")+4 : n],
-				}
-				close(done)
-				cancel()
-			} else {
-				conn.Close()
-			}
-			muLock.Unlock()
-		}(p, idx+1)
+			return false, 0
+		})
 	}
-
-	wg.Wait()
-	return winner
-}
-
-func raceHTTP(firstChunk []byte, candidates []string, staggerMs int) *RaceResult {
-	var muLock sync.Mutex
-	var winner *RaceResult
-	var wg sync.WaitGroup
-	done := make(chan struct{})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	for idx, p := range candidates {
-		if idx > 0 {
-			select {
-			case <-done:
-				break
-			case <-time.After(time.Duration(staggerMs) * time.Millisecond):
-			}
-		}
-
-		muLock.Lock()
-		if winner != nil {
-			muLock.Unlock()
-			break
-		}
-		muLock.Unlock()
-
-		wg.Add(1)
-		go func(proxyStr string, attemptNum int) {
-			defer wg.Done()
-
-			dialer := &net.Dialer{Timeout: 6 * time.Second}
-			conn, err := dialer.DialContext(ctx, "tcp", proxyStr)
-			if err != nil {
-				return
-			}
-
-			_, err = conn.Write(firstChunk)
-			if err != nil {
-				conn.Close()
-				return
-			}
-
-			muLock.Lock()
-			if winner == nil {
-				winner = &RaceResult{
-					Conn:     conn,
-					Proxy:    proxyStr,
-					Attempts: attemptNum,
-				}
-				close(done)
-				cancel()
-			} else {
-				conn.Close()
-			}
-			muLock.Unlock()
-		}(p, idx+1)
-	}
-
-	wg.Wait()
-	return winner
-}
-
-func peekStatus(conn net.Conn, timeoutMs int) (int, []byte) {
-	buf := make([]byte, 4096)
-	_ = conn.SetReadDeadline(time.Now().Add(time.Duration(timeoutMs) * time.Millisecond))
-	n, err := conn.Read(buf)
-	_ = conn.SetReadDeadline(time.Time{})
-
-	if err != nil || n == 0 {
-		return 0, nil
-	}
-
-	text := string(buf[:n])
-	m := regexp.MustCompile(`HTTP/\d\.\d\s+(\d+)`).FindStringSubmatch(text)
-	status := 0
-	if len(m) > 1 {
-		status, _ = strconv.Atoi(m[1])
-	}
-
-	if n < 1000 && (strings.Contains(text, "Rate limit") || strings.Contains(text, "FreeUsageLimitError")) {
-		status = 429
-	}
-
-	return status, buf[:n]
-}
-
-func fastCheck(proxyStr string) bool {
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	conn, err := dialer.Dial("tcp", proxyStr)
-	if err != nil {
-		return false
-	}
-	defer conn.Close()
-
-	_, err = conn.Write([]byte("CONNECT ifconfig.me:443 HTTP/1.1\r\nHost: ifconfig.me:443\r\n\r\n"))
-	if err != nil {
-		return false
-	}
-
-	buf := make([]byte, 1024)
-	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	n, err := conn.Read(buf)
-	if err != nil || !strings.Contains(string(buf[:n]), "200") {
-		return false
-	}
-
-	tlsConn := tls.Client(conn, config.GetTLSConfig("ifconfig.me"))
-	defer tlsConn.Close()
-
-	_ = tlsConn.SetDeadline(time.Now().Add(5 * time.Second))
-	err = tlsConn.Handshake()
-	if err != nil {
-		return false
-	}
-
-	_, err = tlsConn.Write([]byte("GET /ip HTTP/1.1\r\nHost: ifconfig.me\r\nConnection: close\r\n\r\n"))
-	if err != nil {
-		return false
-	}
-
-	var respBuf bytes.Buffer
-	_, _ = io.Copy(&respBuf, tlsConn)
-	body := respBuf.String()
-
-	match := regexp.MustCompile(`\d+\.\d+\.\d+\.\d+`).FindString(body)
-	return match != "" && (proxy.GetVPSIP() == "" || match != proxy.GetVPSIP())
-}
-
-// targetCheck does a quick HTTP GET through proxy to target to detect 429/403.
-func targetCheck(proxyStr, host string, port int) int {
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	conn, err := dialer.Dial("tcp", proxyStr)
-	if err != nil {
-		return 0
-	}
-	defer conn.Close()
-
-	req := fmt.Sprintf("CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n\r\n", host, port, host, port)
-	_, err = conn.Write([]byte(req))
-	if err != nil {
-		return 0
-	}
-	buf := make([]byte, 1024)
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	n, err := conn.Read(buf)
-	conn.SetReadDeadline(time.Time{})
-	if err != nil || !strings.Contains(string(buf[:n]), "200") {
-		return 0
-	}
-
-	tlsConn := tls.Client(conn, &tls.Config{ServerName: host})
-	defer tlsConn.Close()
-	tlsConn.SetDeadline(time.Now().Add(5 * time.Second))
-	if err := tlsConn.Handshake(); err != nil {
-		return 0
-	}
-	tlsConn.SetDeadline(time.Time{})
-
-	// Send GET request and check status
-	getReq := fmt.Sprintf("GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", host)
-	_, err = tlsConn.Write([]byte(getReq))
-	if err != nil {
-		return 0
-	}
-
-	var respBuf bytes.Buffer
-	tlsConn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	_, _ = io.Copy(&respBuf, tlsConn)
-	body := respBuf.String()
-
-	m := regexp.MustCompile(`HTTP/\d\.\d\s+(\d+)`).FindStringSubmatch(body)
-	if len(m) < 2 {
-		return 0
-	}
-	status, _ := strconv.Atoi(m[1])
-	return status
 }
