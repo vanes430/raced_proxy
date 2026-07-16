@@ -13,13 +13,7 @@ import (
 var Version = "dev"
 
 func main() {
-	ver := Version
-	if ver == "dev" {
-		if v := readVersionFromFile(); v != "" {
-			ver = v
-		}
-	}
-	logger.ShowBanner(ver)
+	logger.ShowBanner(Version)
 
 	if len(os.Args) < 2 {
 		printUsage()
@@ -41,18 +35,4 @@ func printUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  ./raced_proxy scan     - Run the proxy checker/scanner")
 	fmt.Println("  ./raced_proxy rotate   - Start the TCP proxy rotator server")
-}
-
-func readVersionFromFile() string {
-	data, err := os.ReadFile("file.properties")
-	if err != nil {
-		return ""
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "version=") {
-			return strings.TrimPrefix(line, "version=")
-		}
-	}
-	return ""
 }

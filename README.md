@@ -26,7 +26,7 @@ Grab the latest pre-built binary from [releases](https://github.com/vanes430/rac
 ## Build from Source
 
 ```bash
-go build -ldflags="-s -w" -o raced_proxy cmd/raced_proxy/main.go
+go build -ldflags="-s -w -X main.Version=$(git describe --tags --abbrev=0 2>/dev/null || echo dev)" -o raced_proxy cmd/raced_proxy/main.go
 ```
 
 ## Usage
