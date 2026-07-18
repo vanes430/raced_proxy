@@ -77,7 +77,7 @@ raced_proxy/
 ## COMMANDS
 
 ```bash
-go build -ldflags="-s -w -X main.Version=$(git describe --tags --abbrev=0 2>/dev/null || echo dev)" -o raced_proxy cmd/raced_proxy/main.go
+go build -ldflags="-s -w -X main.Version=$(git rev-parse --short HEAD)" -o raced_proxy cmd/raced_proxy/main.go
 ./raced_proxy scan              # Fetch + validate proxies → proxy.txt
 ./raced_proxy rotate            # Start TCP proxy server on :8090
 curl -x http://127.0.0.1:8090 https://ifconfig.me/ip
