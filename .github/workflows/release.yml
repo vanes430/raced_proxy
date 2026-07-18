@@ -71,14 +71,14 @@ jobs:
       - name: Package zip
         run: |
           V=${{ needs.version.outputs.version }}
-          cp .env.example url-list.txt dist/
+          cp .env.example dist/
           cd dist
           ZIP_NAME="${APP_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}-${V}.zip"
+          BINARY="${APP_NAME}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip "$ZIP_NAME" "${APP_NAME}.exe" .env.example url-list.txt
-          else
-            zip "$ZIP_NAME" "${APP_NAME}" .env.example url-list.txt
+            BINARY="${APP_NAME}.exe"
           fi
+          zip "$ZIP_NAME" "$BINARY" .env.example
           echo "Created ${ZIP_NAME}"
 
       - uses: actions/upload-artifact@v4
