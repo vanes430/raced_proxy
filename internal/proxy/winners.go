@@ -1,59 +1,30 @@
 package proxy
 
 import (
-	"math/rand"
 	"sort"
-	"sync"
 	"time"
 
 	"raced_proxy/internal/config"
 	"raced_proxy/internal/logger"
 )
 
-var (
-	winnerBorn       = make(map[string]time.Time)
-	winnerCooldownUntil = make(map[string]time.Time)
-	winnerTTL        time.Duration
-	winnerCooldown   time.Duration
-	maxLatencyMs     int
-)
+// winnerBorn records the insertion timestamp of each winner for TTL expiry.
+var winnerBorn = make(map[string]time.Time)
 
-func pickRandom(n int, skip map[string]bool) []string {
-	now := time.Now()
-	var cands []string
-	for _, p := range proxies {
-		if skip[p] {
-			continue
-		}
-		if inSlice(topWinners, p) {
-			continue
-		}
-		if until, ok := winnerCooldownUntil[p]; ok {
-			if now.Before(until) {
-				continue
-			}
-			delete(winnerCooldownUntil, p)
-		}
-		cands = append(cands, p)
-	}
-	rand.Shuffle(len(cands), func(i, j int) {
-		cands[i], cands[j] = cands[j], cands[i]
-	})
-	if len(cands) > n {
-		cands = cands[:n]
-	}
-	return cands
-}
+// winnerCooldownUntil tracks when a removed winner may be retried.
+var winnerCooldownUntil = make(map[string]time.Time)
 
-func inSlice(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}
+// winnerTTL is the time-to-live duration for winners (0 = disabled).
+var winnerTTL time.Duration
 
+// winnerCooldown is the cooldown before retrying a failed winner (0 = disabled).
+var winnerCooldown time.Duration
+
+// maxLatencyMs is the maximum allowed latency in ms; 0 = no limit.
+var maxLatencyMs int
+
+// InitWinnerConfig reads WINNER_TTL, WINNER_COOLDOWN, and MAX_LATENCY
+// from environment and starts the expiry loop if TTL or cooldown is enabled.
 func InitWinnerConfig() {
 	ttlMin := config.GetEnvInt("WINNER_TTL", 0)
 	if ttlMin > 0 {
@@ -69,6 +40,7 @@ func InitWinnerConfig() {
 	}
 }
 
+// startExpiryLoop ticks every 30 seconds and removes expired winners.
 func startExpiryLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -77,6 +49,7 @@ func startExpiryLoop() {
 	}
 }
 
+// expireWinners removes winners whose TTL has elapsed. Caller need not hold mu.
 func expireWinners() {
 	mu.Lock()
 	defer mu.Unlock()
@@ -98,6 +71,8 @@ func expireWinners() {
 	}
 }
 
+// insertWinner adds a proxy to the winners list sorted by latency.
+// p: proxy address. ms: latency in milliseconds.
 func insertWinner(p string, ms int) {
 	if maxLatencyMs > 0 && ms > maxLatencyMs {
 		logger.Warn("Rejected %s (%dms > %dms max latency)", p, ms, maxLatencyMs)
@@ -115,66 +90,9 @@ func insertWinner(p string, ms int) {
 	}
 }
 
-func Bootstrap(testFn func(proxy string) (ok bool, ms int)) {
-	mu.RLock()
-	total := len(proxies)
-	mu.RUnlock()
-
-	skip := make(map[string]bool)
-
-	for {
-		mu.RLock()
-		full := len(topWinners) >= maxWinners
-		mu.RUnlock()
-		if full {
-			logger.Ok("Bootstrap complete: %d winners", maxWinners)
-			return
-		}
-
-		cands := pickRandom(20, skip)
-		if len(cands) == 0 {
-			break
-		}
-
-		var wg sync.WaitGroup
-		for _, p := range cands {
-			skip[p] = true
-			wg.Add(1)
-			go func(proxy string) {
-				defer wg.Done()
-				ok, ms := testFn(proxy)
-				if ok {
-					mu.Lock()
-					insertWinner(proxy, ms)
-					mu.Unlock()
-				}
-			}(p)
-		}
-		wg.Wait()
-		mu.RLock()
-		logger.Info("Bootstrap batch done: %d/%d winners", len(topWinners), maxWinners)
-		mu.RUnlock()
-	}
-
-	mu.RLock()
-	count := len(topWinners)
-	mu.RUnlock()
-	if count == 0 {
-		logger.Warn("Bootstrap: no winners found from %d proxies", total)
-	} else {
-		logger.Ok("Bootstrap complete: %d winners (pool exhausted)", count)
-	}
-}
-
-func PickTopWinner() string {
-	mu.RLock()
-	defer mu.RUnlock()
-	if len(topWinners) == 0 {
-		return ""
-	}
-	return topWinners[0]
-}
-
+// RemoveWinner removes a proxy from winners, clears its latency data,
+// and sets a cooldown before it can be retried (if cooldown > 0).
+// p: proxy address to remove.
 func RemoveWinner(p string) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -195,38 +113,21 @@ func RemoveWinner(p string) {
 	}
 }
 
+// PickTopWinner returns the fastest available winner proxy address.
+// Returns: proxy address string, or empty string if no winners exist.
+func PickTopWinner() string {
+	mu.RLock()
+	defer mu.RUnlock()
+	if len(topWinners) == 0 {
+		return ""
+	}
+	return topWinners[0]
+}
+
+// NeedRefill reports whether the winner pool needs more proxies.
+// Returns: true when winners are at or below half capacity.
 func NeedRefill() bool {
 	mu.RLock()
 	defer mu.RUnlock()
 	return len(topWinners) <= maxWinners/2 && len(topWinners) < maxWinners
-}
-
-func Refill(n int, testFn func(proxy string) (ok bool, ms int)) {
-	mu.RLock()
-	remain := maxWinners - len(topWinners)
-	mu.RUnlock()
-	if remain <= 0 {
-		return
-	}
-
-	skip := make(map[string]bool)
-	cands := pickRandom(n, skip)
-	var wg sync.WaitGroup
-	for _, p := range cands {
-		wg.Add(1)
-		go func(proxy string) {
-			defer wg.Done()
-			ok, ms := testFn(proxy)
-			if ok {
-				mu.Lock()
-				insertWinner(proxy, ms)
-				mu.Unlock()
-			}
-		}(p)
-	}
-	wg.Wait()
-
-	mu.RLock()
-	logger.Info("Refill done: %d/%d winners", len(topWinners), maxWinners)
-	mu.RUnlock()
 }

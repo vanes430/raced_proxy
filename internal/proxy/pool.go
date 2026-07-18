@@ -2,10 +2,6 @@ package proxy
 
 import (
 	"bufio"
-	"crypto/sha256"
-	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"regexp"
 	"strings"
@@ -16,17 +12,35 @@ import (
 	"raced_proxy/internal/logger"
 )
 
-var (
-	proxies    []string
-	topWinners []string
-	winnerMs   = make(map[string]int)
-	maxWinners = 20
-	hostIP      string
-	mu         sync.RWMutex
-	proxyFile  string
-	archiveDir = "proxy_bekas"
-)
+// proxies holds the current list of loaded proxy addresses (ip:port).
+var proxies []string
 
+// topWinners holds the fastest proxies sorted by latency (ascending).
+var topWinners []string
+
+// winnerMs maps proxy address to latency in milliseconds.
+var winnerMs = make(map[string]int)
+
+// maxWinners is the maximum number of winners kept in memory.
+var maxWinners = 20
+
+// hostIP is the real public IP of the host machine.
+var hostIP string
+
+// mu serializes all pool and winner state mutations.
+var mu sync.RWMutex
+
+// proxyFile is the path to the proxy list file (e.g. proxy.txt).
+var proxyFile string
+
+// archiveDir is the directory where rate-limited proxies are archived.
+var archiveDir = "proxy_bekas"
+
+// mtime stores the last modification time of the proxy file.
+var mtime time.Time
+
+// InitPool initializes the proxy pool with the given file path and host IP.
+// file: path to the proxy list file. ip: the host's real public IP.
 func InitPool(file string, ip string) {
 	proxyFile = file
 	hostIP = ip
@@ -35,18 +49,24 @@ func InitPool(file string, ip string) {
 	_ = os.MkdirAll(archiveDir, 0755)
 }
 
+// GetProxies returns a snapshot of all loaded proxies.
+// Returns: slice of proxy address strings (ip:port).
 func GetProxies() []string {
 	mu.RLock()
 	defer mu.RUnlock()
 	return proxies
 }
 
+// GetTopWinners returns a snapshot of the current top winners.
+// Returns: slice of winning proxy address strings sorted by latency.
 func GetTopWinners() []string {
 	mu.RLock()
 	defer mu.RUnlock()
 	return topWinners
 }
 
+// LoadProxies reads the proxy file and replaces the in-memory proxy list.
+// Parses lines matching ip:port format; updates mtime.
 func LoadProxies() {
 	mu.Lock()
 	defer mu.Unlock()
@@ -75,75 +95,24 @@ func LoadProxies() {
 	logger.Info("Loaded %d proxies from %s", len(list), proxyFile)
 }
 
-var mtime time.Time
-
-func WatchProxyFile() {
-	var prevHash string
-	for {
-		time.Sleep(3 * time.Second)
-		data, err := os.ReadFile(proxyFile)
-		if err != nil {
-			continue
-		}
-		h := fmt.Sprintf("%x", sha256.Sum256(data))
-		if h == prevHash {
-			continue
-		}
-		prevHash = h
-		LoadProxies()
-		logger.Info("Reloaded %d proxies automatically (proxy.txt changed)", len(proxies))
-	}
-}
-
+// GetProxiesCount returns the number of loaded proxies.
+// Returns: integer count of proxies.
 func GetProxiesCount() int {
 	mu.RLock()
 	defer mu.RUnlock()
 	return len(proxies)
 }
 
+// GetStats returns the total proxy count and current winner count.
+// Returns: (total proxies, total winners).
 func GetStats() (int, int) {
 	mu.RLock()
 	defer mu.RUnlock()
 	return len(proxies), len(topWinners)
 }
 
-func PrintTopWinners(limit int) {
-	mu.RLock()
-	defer mu.RUnlock()
-
-	if len(topWinners) == 0 {
-		fmt.Println("\n  No winners.")
-		return
-	}
-	n := limit
-	if n > len(topWinners) {
-		n = len(topWinners)
-	}
-	fmt.Println("")
-	for i := 0; i < n; i++ {
-		p := topWinners[i]
-		fmt.Printf("  %2d. %-21s %dms\n", i+1, p, winnerMs[p])
-	}
-	fmt.Println("")
-}
-
-func ResetWinners() {
-	mu.Lock()
-	defer mu.Unlock()
-	topWinners = nil
-	winnerMs = make(map[string]int)
-}
-
-func GetRealIP() (string, error) {
-	resp, err := http.Get("https://ifconfig.me/ip")
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	return strings.TrimSpace(string(body)), nil
-}
-
+// GetHostIP returns the host's real public IP address.
+// Returns: IP address string.
 func GetHostIP() string {
 	mu.RLock()
 	defer mu.RUnlock()

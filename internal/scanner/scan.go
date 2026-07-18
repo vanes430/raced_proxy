@@ -12,20 +12,11 @@ import (
 	"raced_proxy/internal/proxy"
 )
 
-type CheckResult struct {
-	Proxy string
-	Ms    int
-}
-
-type SourceData struct {
-	Name    string
-	URL     string
-	Proxies []string
-	Fetched int
-}
-
+// realIP stores the host machine's public IP, used for IP-leak detection in test.go.
 var realIP string
 
+// RunScanner executes the full 2-stage proxy scanning pipeline:
+// fetch sources, detect IP, filter rate-limited, stage1 (IP leak), stage2 (target), dedup, write.
 func RunScanner() {
 	targetURL := config.GetEnv("SCAN_TARGET", "https://opencode.ai/zen/v1/chat/completions")
 	timeoutMs := config.GetEnvInt("REQUEST_TIMEOUT", 1500)
@@ -143,30 +134,11 @@ func RunScanner() {
 		logger.Ok("Working proxies: %d | Average latency: %dms | Total time: %.1fs", len(results), avg, elapsed.Seconds())
 		logger.Ok("Results written to: %s", outputFile)
 
-		fmt.Printf("\n%s  Source Success Rates%s\n\n", logger.Bold, logger.Reset)
 		workingMap := make(map[string]bool)
 		for _, w := range results {
 			workingMap[w.Proxy] = true
 		}
-		for _, src := range sources {
-			success := 0
-			for _, p := range src.Proxies {
-				if workingMap[p] {
-					success++
-				}
-			}
-			pct := 0.0
-			if src.Fetched > 0 {
-				pct = (float64(success) / float64(src.Fetched)) * 100
-			}
-			color := logger.Red
-			if pct >= 5 {
-				color = logger.Green
-			} else if pct >= 1 {
-				color = logger.Yellow
-			}
-			fmt.Printf("  %-30s %d/%d (%s%.1f%%%s)\n", src.Name, success, src.Fetched, color, pct, logger.Reset)
-		}
+		printSourceStats(sources, workingMap)
 	}
 
 	fmt.Println()

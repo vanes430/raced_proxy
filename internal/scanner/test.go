@@ -15,6 +15,11 @@ import (
 	"raced_proxy/internal/config"
 )
 
+// testIPLeak tests whether a proxy leaks the host IP by CONNECTing to ifconfig.me
+// over TLS and comparing the response IP against the known realIP.
+// proxyStr: proxy address in host:port format.
+// timeoutMs: per-operation timeout in milliseconds.
+// Returns: true if the proxy returns a different IP than the host (no leak), false otherwise.
 func testIPLeak(proxyStr string, timeoutMs int) bool {
 	dialer := &net.Dialer{
 		Timeout:   time.Duration(timeoutMs) * time.Millisecond,
@@ -65,6 +70,11 @@ func testIPLeak(proxyStr string, timeoutMs int) bool {
 	return match != "" && (realIP == "" || match != realIP)
 }
 
+// testTarget tests whether a proxy can reach the scan target via CONNECT+TLS and
+// successfully complete a chat completion POST (HTTP 200, no rate-limit errors).
+// proxyStr: proxy address in host:port format.
+// timeoutMs: per-operation timeout in milliseconds.
+// Returns: true if the proxy returns HTTP 200 without rate-limit or free-usage errors.
 func testTarget(proxyStr string, timeoutMs int) bool {
 	scanTarget := config.GetEnv("SCAN_TARGET", "opencode.ai")
 	dialer := &net.Dialer{

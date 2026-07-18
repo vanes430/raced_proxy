@@ -14,6 +14,9 @@ import (
 	"raced_proxy/internal/logger"
 )
 
+// generateDefaultURLList creates an empty url-list.txt file with a comment header
+// when the source file is missing or empty.
+// path: file path to write the default URL list.
 func generateDefaultURLList(path string) {
 	var buf strings.Builder
 	buf.WriteString("# Proxy source URLs (one per line)\n")
@@ -22,6 +25,9 @@ func generateDefaultURLList(path string) {
 	logger.Warn("Generated empty %s — add your proxy source URLs", path)
 }
 
+// fetchAllProxies reads source URLs from the URL list file, fetches proxy lists
+// from each source in parallel, and deduplicates across all sources.
+// Returns: a deduplicated list of all proxy addresses, and the per-source metadata.
 func fetchAllProxies() ([]string, []SourceData) {
 	urlListFile := config.GetEnv("SOURCE_FILE", "url-list.txt")
 

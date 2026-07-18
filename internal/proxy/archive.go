@@ -8,6 +8,8 @@ import (
 	"raced_proxy/internal/logger"
 )
 
+// ArchiveRateLimited appends a proxy to today's archive file and removes it
+// from the active pool. proxyStr: the proxy address (ip:port) to archive.
 func ArchiveRateLimited(proxyStr string) {
 	today := time.Now().Format("2006-01-02") + ".txt"
 	path := archiveDir + "/" + today
@@ -22,6 +24,9 @@ func ArchiveRateLimited(proxyStr string) {
 	logger.Warn("Archived %s (rate limited)", proxyStr)
 }
 
+// IsRateLimitedToday checks whether a proxy was already archived today.
+// proxyStr: the proxy address (ip:port) to check.
+// Returns: true if the proxy appears in today's archive file.
 func IsRateLimitedToday(proxyStr string) bool {
 	today := time.Now().Format("2006-01-02") + ".txt"
 	path := archiveDir + "/" + today
@@ -38,6 +43,9 @@ func IsRateLimitedToday(proxyStr string) bool {
 	return false
 }
 
+// DeleteProxy removes a proxy from both the active pool and the winners list,
+// then triggers an async persist to proxy.txt.
+// proxyStr: the proxy address (ip:port) to remove.
 func DeleteProxy(proxyStr string) {
 	mu.Lock()
 	idx := -1

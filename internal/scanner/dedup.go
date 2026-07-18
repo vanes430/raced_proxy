@@ -7,6 +7,10 @@ import (
 	"raced_proxy/internal/logger"
 )
 
+// dedupByIP removes duplicate proxies sharing the same IP, keeping the one with
+// the lowest latency (preferring common ports like 80, 443, 8080, etc.).
+// results: slice of CheckResult with proxy addresses and latencies.
+// Returns: deduplicated slice with one entry per unique IP.
 func dedupByIP(results []CheckResult) []CheckResult {
 	type entry struct {
 		proxy      CheckResult
@@ -74,6 +78,9 @@ func dedupByIP(results []CheckResult) []CheckResult {
 	return deduped
 }
 
+// isCommonPort checks whether a port number is a commonly used proxy port.
+// port: TCP port number to check.
+// Returns: true if the port is in the well-known proxy port set.
 func isCommonPort(port int) bool {
 	switch port {
 	case 80, 443, 8080, 8443, 3128, 1080, 9050, 10808, 10809, 20170, 20171, 20172, 20173:

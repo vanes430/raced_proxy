@@ -7,6 +7,11 @@ import (
 	"raced_proxy/internal/logger"
 )
 
+// runStage1 validates proxies for IP leaks by testing CONNECT+TLS to ifconfig.me.
+// proxiesList: candidate proxy addresses in host:port format.
+// concurrencyLimit: max simultaneous goroutines.
+// timeoutMs: per-proxy dial and read timeout in milliseconds.
+// Returns: slice of proxy addresses that passed IP-leak detection.
 func runStage1(proxiesList []string, concurrencyLimit int, timeoutMs int) []string {
 	var passed []string
 	var muLock sync.Mutex
@@ -47,6 +52,11 @@ func runStage1(proxiesList []string, concurrencyLimit int, timeoutMs int) []stri
 	return passed
 }
 
+// runStage2 validates proxies by sending a chat completion POST to the scan target.
+// proxiesList: proxy addresses that passed stage1.
+// concurrencyLimit: max simultaneous goroutines.
+// timeoutMs: per-proxy dial and read timeout in milliseconds.
+// Returns: slice of proxy addresses that returned HTTP 200 without rate-limit errors.
 func runStage2(proxiesList []string, concurrencyLimit int, timeoutMs int) []string {
 	var passed []string
 	var muLock sync.Mutex

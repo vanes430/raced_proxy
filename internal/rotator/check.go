@@ -15,8 +15,13 @@ import (
 	"raced_proxy/internal/config"
 )
 
+// checkTimeout is the deadline for dial, TLS handshake, and chat completion.
 const checkTimeout = 5 * time.Second
 
+// peekStatus reads from a connection within a timeout and extracts the HTTP
+// status code from the response. conn: the connection to read from.
+// timeoutMs: read deadline in milliseconds.
+// Returns: the HTTP status code and the raw response bytes.
 func peekStatus(conn net.Conn, timeoutMs int) (int, []byte) {
 	buf := make([]byte, 4096)
 	_ = conn.SetReadDeadline(time.Now().Add(time.Duration(timeoutMs) * time.Millisecond))
@@ -37,6 +42,12 @@ func peekStatus(conn net.Conn, timeoutMs int) (int, []byte) {
 	return status, buf[:n]
 }
 
+// targetCheck performs a full pre-flight check through a proxy: dials the
+// proxy, sends a CONNECT tunnel, upgrades to TLS, and POSTs a chat
+// completion request to verify the proxy can reach the target.
+// proxyStr: proxy address (ip:port). host: target hostname.
+// port: target port.
+// Returns: HTTP status code and the chat completion response ID.
 func targetCheck(proxyStr, host string, port int) (int, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
 	defer cancel()
@@ -94,6 +105,7 @@ func targetCheck(proxyStr, host string, port int) (int, string) {
 	return status, id
 }
 
+// ctxDeadline extracts the deadline from a context, falling back to now+2s.
 func ctxDeadline(ctx context.Context) time.Time {
 	dl, ok := ctx.Deadline()
 	if !ok {
@@ -102,8 +114,11 @@ func ctxDeadline(ctx context.Context) time.Time {
 	return dl
 }
 
+// chatIDRe matches the "id" field in a JSON chat completion response.
 var chatIDRe = regexp.MustCompile(`"id"\s*:\s*"([^"]+)"`)
 
+// extractChatID extracts the chat completion ID from a raw HTTP response body.
+// raw: the full response string. Returns: the ID value, or empty string if not found.
 func extractChatID(raw string) string {
 	m := chatIDRe.FindStringSubmatch(raw)
 	if len(m) < 2 {

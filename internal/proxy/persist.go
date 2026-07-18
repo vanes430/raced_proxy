@@ -7,15 +7,19 @@ import (
 	"time"
 )
 
-var (
-	persistCh = make(chan struct{}, 1)
-	persistMu sync.Mutex
-)
+// persistCh is a buffered channel used to coalesce proxy.txt write requests.
+var persistCh = make(chan struct{}, 1)
 
+// persistMu guards the persist loop (currently unused but reserved for future coordination).
+var persistMu sync.Mutex
+
+// init starts the background persist loop goroutine at package load time.
 func init() {
 	go persistLoop()
 }
 
+// persistLoop listens on persistCh, waits 200ms to coalesce rapid changes,
+// then writes the current proxy list to proxyFile.
 func persistLoop() {
 	for range persistCh {
 		time.Sleep(200 * time.Millisecond)
@@ -30,6 +34,8 @@ func persistLoop() {
 	}
 }
 
+// triggerPersist sends a non-blocking signal to the persist loop to write
+// the current proxy list to disk.
 func triggerPersist() {
 	select {
 	case persistCh <- struct{}{}:

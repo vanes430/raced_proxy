@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+// StartCLI reads commands from stdin in a loop and dispatches them.
+// Supported commands: del, status, top, reload, reset, help.
 func StartCLI() {
 	inputScan := bufio.NewScanner(os.Stdin)
 	for inputScan.Scan() {
