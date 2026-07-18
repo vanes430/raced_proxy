@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"raced_proxy/internal/logger"
+	"github.com/vanes430/raced_proxy/internal/logger"
 )
 
 // Bootstrap fills the winner pool by testing random proxies from the pool

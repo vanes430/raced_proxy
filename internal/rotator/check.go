@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"raced_proxy/internal/config"
+	"github.com/vanes430/raced_proxy/internal/config"
 )
 
 // checkTimeout is the deadline for dial, TLS handshake, and chat completion.
@@ -57,10 +57,10 @@ func targetCheck(proxyStr, host string, port int) (int, string) {
 	if err != nil {
 		return 0, ""
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if dl, ok := ctx.Deadline(); ok {
-		conn.SetDeadline(dl)
+		_ = conn.SetDeadline(dl)
 	}
 
 	req := fmt.Sprintf("CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n\r\n", host, port, host, port)
@@ -75,7 +75,7 @@ func targetCheck(proxyStr, host string, port int) (int, string) {
 	}
 
 	tlsConn := tls.Client(conn, config.GetTLSConfig(host))
-	defer tlsConn.Close()
+	defer func() { _ = tlsConn.Close() }()
 
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		return 0, ""
@@ -91,7 +91,7 @@ func targetCheck(proxyStr, host string, port int) (int, string) {
 
 	var respBuf bytes.Buffer
 	rem := time.Until(ctxDeadline(ctx))
-	tlsConn.SetReadDeadline(time.Now().Add(rem))
+	_ = tlsConn.SetReadDeadline(time.Now().Add(rem))
 	_, _ = io.Copy(&respBuf, tlsConn)
 	raw := respBuf.String()
 

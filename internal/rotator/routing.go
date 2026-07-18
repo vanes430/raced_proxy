@@ -1,14 +1,15 @@
 package rotator
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
 	"time"
 
-	"raced_proxy/internal/logger"
-	"raced_proxy/internal/proxy"
+	"github.com/vanes430/raced_proxy/internal/logger"
+	"github.com/vanes430/raced_proxy/internal/proxy"
 )
 
 // onCONNECT handles CONNECT tunnel requests. Routes directly for non-routed hosts
@@ -23,7 +24,7 @@ func onCONNECT(client net.Conn, target, from string) {
 
 	if !isRoutedHost(host) {
 		logger.Info("direct → %s:%d", host, port)
-		direct, err := net.DialTimeout("tcp", target, 5*time.Second)
+		direct, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(context.Background(), "tcp", target)
 		if err != nil {
 			logger.Fail("direct dial FAIL %s:%d (%v)", host, port, err)
 			_, _ = client.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
@@ -63,7 +64,7 @@ func onCONNECT(client net.Conn, target, from string) {
 			triggerRefill()
 			continue
 		}
-		conn, err := net.DialTimeout("tcp", p, 5*time.Second)
+		conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(context.Background(), "tcp", p)
 		if err != nil {
 			logger.Warn("dial FAIL %s", p)
 			proxy.RemoveWinner(p)
@@ -72,16 +73,16 @@ func onCONNECT(client net.Conn, target, from string) {
 		req := fmt.Sprintf("CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n\r\n", host, port, host, port)
 		_, err = conn.Write([]byte(req))
 		if err != nil {
-			conn.Close()
+			_ = conn.Close()
 			proxy.RemoveWinner(p)
 			continue
 		}
 		resp := make([]byte, 1024)
-		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 		n, err := conn.Read(resp)
-		conn.SetReadDeadline(time.Time{})
+		_ = conn.SetReadDeadline(time.Time{})
 		if err != nil || !strings.Contains(string(resp[:n]), "200") {
-			conn.Close()
+			_ = conn.Close()
 			proxy.RemoveWinner(p)
 			continue
 		}
@@ -110,21 +111,21 @@ func onHTTP(client net.Conn, firstChunk []byte, from string) {
 		if p == "" {
 			break
 		}
-		conn, err := net.DialTimeout("tcp", p, 5*time.Second)
+		conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(context.Background(), "tcp", p)
 		if err != nil {
 			proxy.RemoveWinner(p)
 			continue
 		}
 		_, err = conn.Write(firstChunk)
 		if err != nil {
-			conn.Close()
+			_ = conn.Close()
 			proxy.RemoveWinner(p)
 			continue
 		}
 		status, bufPeek := peekStatus(conn, 3000)
 		if status == 429 {
 			logger.Warn("BLOCKED 429 %s", p)
-			conn.Close()
+			_ = conn.Close()
 			proxy.ArchiveRateLimited(p)
 			continue
 		}

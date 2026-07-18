@@ -3,7 +3,7 @@ package scanner
 import (
 	"fmt"
 
-	"raced_proxy/internal/logger"
+	"github.com/vanes430/raced_proxy/internal/logger"
 )
 
 // CheckResult holds a proxy address and its measured latency in milliseconds.

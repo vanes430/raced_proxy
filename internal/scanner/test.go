@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"raced_proxy/internal/config"
+	"github.com/vanes430/raced_proxy/internal/config"
 )
 
 // testIPLeak tests whether a proxy leaks the host IP by CONNECTing to ifconfig.me
@@ -30,7 +30,7 @@ func testIPLeak(proxyStr string, timeoutMs int) bool {
 	if err != nil {
 		return false
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	req := "CONNECT ifconfig.me:443 HTTP/1.1\r\nHost: ifconfig.me:443\r\n\r\n"
 	_, err = conn.Write([]byte(req))
@@ -46,7 +46,7 @@ func testIPLeak(proxyStr string, timeoutMs int) bool {
 	}
 
 	tlsConn := tls.Client(conn, config.GetTLSConfig("ifconfig.me"))
-	defer tlsConn.Close()
+	defer func() { _ = tlsConn.Close() }()
 
 	err = tlsConn.HandshakeContext(context.Background())
 	if err != nil {
@@ -86,7 +86,7 @@ func testTarget(proxyStr string, timeoutMs int) bool {
 	if err != nil {
 		return false
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	req := fmt.Sprintf("CONNECT %s:443 HTTP/1.1\r\nHost: %s:443\r\n\r\n", scanTarget, scanTarget)
 	_, err = conn.Write([]byte(req))
@@ -102,7 +102,7 @@ func testTarget(proxyStr string, timeoutMs int) bool {
 	}
 
 	tlsConn := tls.Client(conn, config.GetTLSConfig(scanTarget))
-	defer tlsConn.Close()
+	defer func() { _ = tlsConn.Close() }()
 
 	err = tlsConn.HandshakeContext(context.Background())
 	if err != nil {

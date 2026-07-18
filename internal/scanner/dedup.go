@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"raced_proxy/internal/logger"
+	"github.com/vanes430/raced_proxy/internal/logger"
 )
 
 // dedupByIP removes duplicate proxies sharing the same IP, keeping the one with

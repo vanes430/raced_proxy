@@ -4,8 +4,8 @@ import (
 	"sort"
 	"time"
 
-	"raced_proxy/internal/config"
-	"raced_proxy/internal/logger"
+	"github.com/vanes430/raced_proxy/internal/config"
+	"github.com/vanes430/raced_proxy/internal/logger"
 )
 
 // winnerBorn records the insertion timestamp of each winner for TTL expiry.

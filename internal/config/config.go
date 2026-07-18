@@ -17,7 +17,7 @@ func GetEnv(key, fallback string) string {
 		return val
 	}
 	if file, err := os.Open(".env"); err == nil {
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		scan := bufio.NewScanner(file)
 		for scan.Scan() {
 			l := strings.TrimSpace(scan.Text())

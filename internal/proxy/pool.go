@@ -6,10 +6,9 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
-	"raced_proxy/internal/config"
-	"raced_proxy/internal/logger"
+	"github.com/vanes430/raced_proxy/internal/config"
+	"github.com/vanes430/raced_proxy/internal/logger"
 )
 
 // proxies holds the current list of loaded proxy addresses (ip:port).
@@ -36,9 +35,6 @@ var proxyFile string
 // archiveDir is the directory where rate-limited proxies are archived.
 var archiveDir = "proxy_bekas"
 
-// mtime stores the last modification time of the proxy file.
-var mtime time.Time
-
 // InitPool initializes the proxy pool with the given file path and host IP.
 // file: path to the proxy list file. ip: the host's real public IP.
 func InitPool(file string, ip string) {
@@ -46,7 +42,7 @@ func InitPool(file string, ip string) {
 	hostIP = ip
 	archiveDir = config.GetEnv("ARCHIVE_DIR", "proxy_bekas")
 	LoadProxies()
-	_ = os.MkdirAll(archiveDir, 0755)
+	_ = os.MkdirAll(archiveDir, 0755) //nolint:gosec // non-sensitive archive dir
 }
 
 // GetProxies returns a snapshot of all loaded proxies.
@@ -71,11 +67,11 @@ func LoadProxies() {
 	mu.Lock()
 	defer mu.Unlock()
 
-	file, err := os.Open(proxyFile)
+	file, err := os.Open(proxyFile) //nolint:gosec // proxy file path from env
 	if err != nil {
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	ipRe := regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+:\d+$`)
 	var list []string
@@ -88,10 +84,6 @@ func LoadProxies() {
 	}
 	proxies = list
 
-	stat, err := os.Stat(proxyFile)
-	if err == nil {
-		mtime = stat.ModTime()
-	}
 	logger.Info("Loaded %d proxies from %s", len(list), proxyFile)
 }
 

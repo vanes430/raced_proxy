@@ -4,7 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"raced_proxy/internal/logger"
+	"github.com/vanes430/raced_proxy/internal/logger"
 )
 
 // runStage1 validates proxies for IP leaks by testing CONNECT+TLS to ifconfig.me.

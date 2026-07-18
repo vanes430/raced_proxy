@@ -7,9 +7,9 @@ import (
 	"sort"
 	"time"
 
-	"raced_proxy/internal/config"
-	"raced_proxy/internal/logger"
-	"raced_proxy/internal/proxy"
+	"github.com/vanes430/raced_proxy/internal/config"
+	"github.com/vanes430/raced_proxy/internal/logger"
+	"github.com/vanes430/raced_proxy/internal/proxy"
 )
 
 // realIP stores the host machine's public IP, used for IP-leak detection in test.go.
@@ -83,7 +83,7 @@ func RunScanner() {
 	logger.Ok("Stage 1 Result — Passed: %d | Failed: %d | Time: %.1fs", len(stage1Passed), stage1Fail, stage1Elapsed.Seconds())
 	if len(stage1Passed) == 0 {
 		logger.Fail("All proxies failed IP leak detection.")
-		_ = os.WriteFile(outputFile, []byte(""), 0644)
+		_ = os.WriteFile(outputFile, []byte(""), 0644) //nolint:gosec // clearing output file
 		return
 	}
 	fmt.Println()
@@ -98,7 +98,7 @@ func RunScanner() {
 	logger.Ok("Stage 2 Result — Passed: %d | Failed: %d | Time: %.1fs", len(working), stage2Fail, stage2Elapsed.Seconds())
 	if len(working) == 0 {
 		logger.Fail("All proxies blocked or inaccessible.")
-		_ = os.WriteFile(outputFile, []byte(""), 0644)
+		_ = os.WriteFile(outputFile, []byte(""), 0644) //nolint:gosec // clearing output file
 		return
 	}
 	fmt.Println()
@@ -119,7 +119,7 @@ func RunScanner() {
 	for _, w := range results {
 		buf.WriteString(w.Proxy + "\n")
 	}
-	_ = os.WriteFile(outputFile, buf.Bytes(), 0644)
+	_ = os.WriteFile(outputFile, buf.Bytes(), 0644) //nolint:gosec // writing proxy output file
 
 	logger.Section("SCAN COMPLETE")
 	fmt.Println()

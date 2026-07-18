@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"raced_proxy/internal/logger"
+	"github.com/vanes430/raced_proxy/internal/logger"
 )
 
 // ArchiveRateLimited appends a proxy to today's archive file and removes it
@@ -14,10 +14,10 @@ func ArchiveRateLimited(proxyStr string) {
 	today := time.Now().Format("2006-01-02") + ".txt"
 	path := archiveDir + "/" + today
 
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // proxy file, not secrets
 	if err == nil {
 		_, _ = f.WriteString(proxyStr + "\n")
-		f.Close()
+		_ = f.Close()
 	}
 
 	DeleteProxy(proxyStr)
@@ -31,7 +31,7 @@ func IsRateLimitedToday(proxyStr string) bool {
 	today := time.Now().Format("2006-01-02") + ".txt"
 	path := archiveDir + "/" + today
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // proxy file path from env
 	if err != nil {
 		return false
 	}

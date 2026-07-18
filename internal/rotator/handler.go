@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"raced_proxy/internal/logger"
+	"github.com/vanes430/raced_proxy/internal/logger"
 )
 
 // handleClient reads the initial request from a client connection,
@@ -15,7 +15,7 @@ import (
 // client: the accepted TCP connection. authEnabled: whether proxy auth is required.
 // authHeaderVal: expected Base64-encoded "user:pass" value for auth.
 func handleClient(client net.Conn, authEnabled bool, authHeaderVal string) {
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	buf := make([]byte, 4096)
 	_ = client.SetReadDeadline(time.Now().Add(5 * time.Second))

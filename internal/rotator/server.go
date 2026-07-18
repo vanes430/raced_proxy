@@ -1,6 +1,7 @@
 package rotator
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"net"
@@ -10,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"raced_proxy/internal/config"
-	"raced_proxy/internal/logger"
-	"raced_proxy/internal/proxy"
+	"github.com/vanes430/raced_proxy/internal/config"
+	"github.com/vanes430/raced_proxy/internal/logger"
+	"github.com/vanes430/raced_proxy/internal/proxy"
 )
 
 // raceCount is the maximum number of proxy attempts per request.
@@ -82,12 +83,12 @@ func RunRotator() {
 	go proxy.StartCLI()
 	logger.Info("File watcher and CLI started")
 
-	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port))
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", fmt.Sprintf("0.0.0.0:%d", port))
 	if err != nil {
 		logger.Fail("Failed to bind port %d: %v", port, err)
 		os.Exit(1)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	authEnabled := proxyUser != "" && proxyPass != ""
 	authHeaderVal := ""
@@ -120,7 +121,7 @@ func RunRotator() {
 	go func() {
 		<-sigCh
 		logger.Info("Shutting down...")
-		listener.Close()
+		_ = listener.Close()
 	}()
 
 	for {

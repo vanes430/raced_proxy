@@ -3,15 +3,11 @@ package proxy
 import (
 	"os"
 	"strings"
-	"sync"
 	"time"
 )
 
 // persistCh is a buffered channel used to coalesce proxy.txt write requests.
 var persistCh = make(chan struct{}, 1)
-
-// persistMu guards the persist loop (currently unused but reserved for future coordination).
-var persistMu sync.Mutex
 
 // init starts the background persist loop goroutine at package load time.
 func init() {
@@ -30,7 +26,7 @@ func persistLoop() {
 		}
 		f := proxyFile
 		mu.RUnlock()
-		_ = os.WriteFile(f, []byte(buf.String()), 0644)
+		_ = os.WriteFile(f, []byte(buf.String()), 0644) //nolint:gosec // proxy file, not secrets
 	}
 }
 

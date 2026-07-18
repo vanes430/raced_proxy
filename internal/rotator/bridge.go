@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"raced_proxy/internal/logger"
-	"raced_proxy/internal/proxy"
+	"github.com/vanes430/raced_proxy/internal/logger"
+	"github.com/vanes430/raced_proxy/internal/proxy"
 )
 
 // bridgeTimeout is the maximum idle duration before a bridged tunnel is closed.
@@ -18,21 +18,21 @@ const bridgeTimeout = 60 * time.Second
 // c2: upstream/proxy connection. proxyStr: the winning proxy address (empty
 // for direct). host: target hostname for logging. port: target port.
 func tunnelAndBridge(c1, c2 net.Conn, proxyStr, host string, port int) {
-	c1.SetDeadline(time.Now().Add(bridgeTimeout))
-	c2.SetDeadline(time.Now().Add(bridgeTimeout))
+	_ = c1.SetDeadline(time.Now().Add(bridgeTimeout))
+	_ = c2.SetDeadline(time.Now().Add(bridgeTimeout))
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		_, _ = io.Copy(c1, c2)
-		c1.Close()
-		c2.Close()
+		_ = c1.Close()
+		_ = c2.Close()
 		wg.Done()
 	}()
 	go func() {
 		_, _ = io.Copy(c2, c1)
-		c2.Close()
-		c1.Close()
+		_ = c2.Close()
+		_ = c1.Close()
 		wg.Done()
 	}()
 	wg.Wait()

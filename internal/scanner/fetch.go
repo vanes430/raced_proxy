@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"raced_proxy/internal/config"
-	"raced_proxy/internal/logger"
+	"github.com/vanes430/raced_proxy/internal/config"
+	"github.com/vanes430/raced_proxy/internal/logger"
 )
 
 // generateDefaultURLList creates an empty url-list.txt file with a comment header
@@ -21,7 +22,7 @@ func generateDefaultURLList(path string) {
 	var buf strings.Builder
 	buf.WriteString("# Proxy source URLs (one per line)\n")
 	buf.WriteString("# Lines starting with # are ignored\n")
-	_ = os.WriteFile(path, []byte(buf.String()), 0644)
+	_ = os.WriteFile(path, []byte(buf.String()), 0644) //nolint:gosec // url list is not secrets
 	logger.Warn("Generated empty %s — add your proxy source URLs", path)
 }
 
@@ -36,12 +37,12 @@ func fetchAllProxies() ([]string, []SourceData) {
 		generateDefaultURLList(urlListFile)
 	}
 
-	file, err := os.Open(urlListFile)
+	file, err := os.Open(urlListFile) //nolint:gosec // path from env
 	if err != nil {
 		fmt.Printf("✗ Failed to open %s: %v\n", urlListFile, err)
 		return nil, nil
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var sources []string
 	scannerObj := bufio.NewScanner(file)
@@ -79,13 +80,18 @@ func fetchAllProxies() ([]string, []SourceData) {
 			}
 
 			fetchStart := time.Now()
-			resp, err := client.Get(targetURL)
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, targetURL, nil)
+			if err != nil {
+				logger.Warn("Fetch failed: %s — %v (%.1fs)", name, err, time.Since(fetchStart).Seconds())
+				return
+			}
+			resp, err := client.Do(req)
 			fetchElapsed := time.Since(fetchStart)
 			if err != nil {
 				logger.Warn("Fetch failed: %s — %v (%.1fs)", name, err, fetchElapsed.Seconds())
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			var proxiesList []string
 			scan := bufio.NewScanner(resp.Body)

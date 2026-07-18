@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -9,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"raced_proxy/internal/logger"
+	"github.com/vanes430/raced_proxy/internal/logger"
 )
 
 // WatchProxyFile watches the proxy file for changes via SHA-256 hash and
@@ -35,11 +36,16 @@ func WatchProxyFile() {
 // GetRealIP fetches the machine's real public IP from ifconfig.me.
 // Returns: IP address string, or error if the request fails.
 func GetRealIP() (string, error) {
-	resp, err := http.Get("https://ifconfig.me/ip")
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://ifconfig.me/ip", nil)
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	return strings.TrimSpace(string(body)), nil
 }
