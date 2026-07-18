@@ -40,6 +40,6 @@ func GetEnvInt(key string, fallback int) int {
 func GetTLSConfig(serverName string) *tls.Config {
 	return &tls.Config{
 		ServerName:         serverName,
-		InsecureSkipVerify: true,
+		InsecureSkipVerify: false,
 	}
 }

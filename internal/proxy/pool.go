@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"raced_proxy/internal/config"
 	"raced_proxy/internal/logger"
 )
 
@@ -20,7 +21,7 @@ var (
 	topWinners []string
 	winnerMs   = make(map[string]int)
 	maxWinners = 20
-	vpsIP      string
+	hostIP      string
 	mu         sync.RWMutex
 	proxyFile  string
 	archiveDir = "proxy_bekas"
@@ -28,7 +29,8 @@ var (
 
 func InitPool(file string, ip string) {
 	proxyFile = file
-	vpsIP = ip
+	hostIP = ip
+	archiveDir = config.GetEnv("ARCHIVE_DIR", "proxy_bekas")
 	LoadProxies()
 	_ = os.MkdirAll(archiveDir, 0755)
 }
@@ -142,8 +144,8 @@ func GetRealIP() (string, error) {
 	return strings.TrimSpace(string(body)), nil
 }
 
-func GetVPSIP() string {
+func GetHostIP() string {
 	mu.RLock()
 	defer mu.RUnlock()
-	return vpsIP
+	return hostIP
 }

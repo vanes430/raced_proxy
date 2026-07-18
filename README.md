@@ -12,7 +12,7 @@ Fast proxy checker + racing proxy server built with **Golang**. Zero runtime dep
 - **Proxy Rotator** — Local TCP server that serves the fastest verified proxy per request.
 - **Top Winners System** — Bootstraps 20 proxies at startup, tests via chat completion, keeps top 20 fastest in memory.
 - **Pre-Flight Check** — Every connection tests the top winner via chat completion POST before bridging.
-- **Auto Archive** — Rate-limited (429) proxies moved to `proxy_bekas/YYYY-MM-DD.txt`, auto-skipped by scanner.
+- **Auto Archive** — Rate-limited (429) proxies moved to `ARCHIVE_DIR/YYYY-MM-DD.txt`, auto-skipped by scanner.
 - **Auto Refill** — When winners drop to ≤10, async refill picks+verifies 20 random proxies from pool.
 - **Auth Support** — Optional Basic proxy authentication.
 - **Hot Reload** — Auto-reloads `proxy.txt` when file changes (SHA-256 watched every 3s).
@@ -85,21 +85,71 @@ help            Show help
 
 ## Environment Variables (.env)
 
-| Variable     | Default   | Description |
-|-------------|-----------|-------------|
-| `PORT`      | `8090`    | Rotator listen port |
-| `CONCURRENCY`| `1000`   | Scanner goroutine limit |
-| `TIMEOUT`   | `1500`    | Connect/read timeout (ms) |
-| `MAX_LATENCY`| `1500`   | Max accepted latency (ms) |
-| `OUTPUT`    | `proxy.txt` | Output file |
-| `RACE`      | `20`      | Proxies to race per request |
-| `STAGGER`   | `20`      | Racing stagger delay (ms) |
-| `PROXY_USER`| -         | Auth username |
-| `PROXY_PASS`| -         | Auth password |
+### Rotator
+
+| Variable | Default | Description |
+|---|---|---|
+| `LISTEN_PORT` | `8090` | TCP listen port |
+| `RACE` | `15` | Max proxy attempts per request |
+| `STAGGER` | `0` | Delay between race attempts (ms) |
+| `AUTH_USER` | - | Basic auth username |
+| `AUTH_PASS` | - | Basic auth password |
+| `WINNER_TTL` | `0` | Auto-expire winners after N minutes (0 = disabled) |
+| `WINNER_COOLDOWN` | `0` | Cooldown before retrying failed winner in seconds (0 = disabled) |
+| `MAX_LATENCY` | `0` | Drop winners exceeding N ms latency (0 = disabled) |
+
+### Scanner
+
+| Variable | Default | Description |
+|---|---|---|
+| `SCAN_TARGET` | `opencode.ai` | Target host for Stage 2 validation |
+| `SOURCE_FILE` | `url-list.txt` | Proxy source URLs file (auto-generated if missing) |
+| `REQUEST_TIMEOUT` | `1500` | Connect/read timeout (ms) |
+| `PROXY_FILE` | `proxy.txt` | Output file for working proxies |
+| `WORKER_COUNT` | `1000` | Scanner goroutine limit |
+| `ARCHIVE_DIR` | `proxy_bekas` | Directory for rate-limited proxy archives |
+
+### Model
+
+| Variable | Default | Description |
+|---|---|---|
+| `MODEL_NAME` | `big-pickle` / `mimo-v2.5-free` | LLM model for validation (scanner/rotator) |
+
+## Connecting to OpenCode
+
+Use the rotator as a proxy for OpenCode:
+
+```bash
+# Terminal 1: start rotator
+./raced_proxy rotate
+
+# Terminal 2: set proxy and run opencode
+export HTTPS_PROXY=http://127.0.0.1:8090
+export NO_PROXY=localhost,127.0.0.1
+opencode
+```
+
+> `NO_PROXY=localhost,127.0.0.1` is **required** — OpenCode's TUI communicates with a local HTTP server. Without it, traffic loops back through the proxy.
+
+For full proxy configuration (authentication, custom certificates, enterprise networks), see the [OpenCode Network docs](https://opencode.ai/docs/network/).
+
+## Using with 9Router
+
+Run Raced Proxy alongside [9Router](https://github.com/decolua/9router) for free AI routing with proxy-rotated connections:
+
+```bash
+# Terminal 1: start rotator
+./raced_proxy rotate
+
+# Terminal 2: start 9router with proxy
+HTTPS_PROXY=http://127.0.0.1:8090 NO_PROXY=localhost,127.0.0.1 npx 9router
+```
+
+Or set `HTTPS_PROXY` in your `.env` / shell profile so all tools (Claude Code, Cursor, Cline, OpenCode...) route through the rotator automatically. See [9Router environment variables](https://github.com/decolua/9router#environment-variables) for more options.
 
 ## How It Works
 
 1. **Startup** — Rotator loads `proxy.txt`, bootstraps by testing 20 random proxies via chat completion POST. Keeps top 20 as "winners".
-2. **Connection** — Pick top winner (fastest). Send chat completion POST through it. If 200 → bridge tunnel. If 429 → archive to `proxy_bekas/`, remove from winners, try next.
+2. **Connection** — Pick top winner (fastest). Send chat completion POST through it to `SCAN_TARGET` (default `opencode.ai`). If 200 → bridge tunnel. If 429 → archive to `ARCHIVE_DIR`, remove from winners, try next.
 3. **Refill** — When winners ≤ 10, async pick 20 random from pool, test, add passing ones to winners until full.
-4. **Scanner** — Fetches from `url-list.txt`, runs Stage 1 (IP leak) then Stage 2 (chat completion with model `big-pickle`). Skips proxies archived today.
+4. **Scanner** — Fetches from `SOURCE_FILE` (default `url-list.txt`), runs Stage 1 (IP leak) then Stage 2 (chat completion via `SCAN_TARGET`). Skips proxies archived today.

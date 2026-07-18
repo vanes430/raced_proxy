@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"raced_proxy/internal/config"
 )
 
 const checkTimeout = 5 * time.Second
@@ -39,14 +41,16 @@ func targetCheck(proxyStr, host string, port int) (int, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
 	defer cancel()
 
-	dialer := &net.Dialer{}
+	dialer := &net.Dialer{Timeout: checkTimeout}
 	conn, err := dialer.DialContext(ctx, "tcp", proxyStr)
 	if err != nil {
 		return 0, ""
 	}
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(checkTimeout))
+	if dl, ok := ctx.Deadline(); ok {
+		conn.SetDeadline(dl)
+	}
 
 	req := fmt.Sprintf("CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n\r\n", host, port, host, port)
 	_, err = conn.Write([]byte(req))
@@ -59,14 +63,15 @@ func targetCheck(proxyStr, host string, port int) (int, string) {
 		return 0, ""
 	}
 
-	tlsConn := tls.Client(conn, &tls.Config{ServerName: host})
+	tlsConn := tls.Client(conn, config.GetTLSConfig(host))
 	defer tlsConn.Close()
 
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		return 0, ""
 	}
 
-	chatBody := `{"model":"deepseek-v4-flash-free","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`
+	model := config.GetEnv("MODEL_NAME", "mimo-v2.5-free")
+	chatBody := fmt.Sprintf(`{"model":"%s","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`, model)
 	postReq := fmt.Sprintf("POST /zen/v1/chat/completions HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", host, len(chatBody), chatBody)
 	_, err = tlsConn.Write([]byte(postReq))
 	if err != nil {
@@ -74,7 +79,8 @@ func targetCheck(proxyStr, host string, port int) (int, string) {
 	}
 
 	var respBuf bytes.Buffer
-	tlsConn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	rem := time.Until(ctxDeadline(ctx))
+	tlsConn.SetReadDeadline(time.Now().Add(rem))
 	_, _ = io.Copy(&respBuf, tlsConn)
 	raw := respBuf.String()
 
@@ -86,6 +92,14 @@ func targetCheck(proxyStr, host string, port int) (int, string) {
 
 	id := extractChatID(raw)
 	return status, id
+}
+
+func ctxDeadline(ctx context.Context) time.Time {
+	dl, ok := ctx.Deadline()
+	if !ok {
+		return time.Now().Add(2 * time.Second)
+	}
+	return dl
 }
 
 var chatIDRe = regexp.MustCompile(`"id"\s*:\s*"([^"]+)"`)

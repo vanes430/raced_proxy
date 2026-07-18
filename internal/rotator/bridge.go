@@ -41,7 +41,7 @@ func tunnelAndBridge(c1, c2 net.Conn, proxyStr, host string, port int) {
 	if proxy.NeedRefill() {
 		go proxy.Refill(20, func(p string) (bool, int) {
 			t0 := time.Now()
-			status, _ := targetCheck(p, "opencode.ai", 443)
+			status, _ := targetCheck(p, scanHost, 443)
 			ms := int(time.Since(t0).Milliseconds())
 			if status == 200 {
 				return true, ms

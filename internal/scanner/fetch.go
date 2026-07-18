@@ -10,13 +10,29 @@ import (
 	"sync"
 	"time"
 
+	"raced_proxy/internal/config"
 	"raced_proxy/internal/logger"
 )
 
+func generateDefaultURLList(path string) {
+	var buf strings.Builder
+	buf.WriteString("# Proxy source URLs (one per line)\n")
+	buf.WriteString("# Lines starting with # are ignored\n")
+	_ = os.WriteFile(path, []byte(buf.String()), 0644)
+	logger.Warn("Generated empty %s — add your proxy source URLs", path)
+}
+
 func fetchAllProxies() ([]string, []SourceData) {
-	file, err := os.Open("url-list.txt")
+	urlListFile := config.GetEnv("SOURCE_FILE", "url-list.txt")
+
+	if info, err := os.Stat(urlListFile); err != nil || info.Size() == 0 {
+		logger.Warn("%s missing or empty, generating default source list", urlListFile)
+		generateDefaultURLList(urlListFile)
+	}
+
+	file, err := os.Open(urlListFile)
 	if err != nil {
-		fmt.Printf("✗ Failed to open url-list.txt: %v\n", err)
+		fmt.Printf("✗ Failed to open %s: %v\n", urlListFile, err)
 		return nil, nil
 	}
 	defer file.Close()
@@ -30,7 +46,7 @@ func fetchAllProxies() ([]string, []SourceData) {
 		}
 	}
 
-	logger.Info("Found %d proxy source URLs in url-list.txt", len(sources))
+	logger.Info("Found %d proxy source URLs in %s", len(sources), urlListFile)
 	fmt.Println()
 
 	var results []SourceData

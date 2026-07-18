@@ -7,9 +7,10 @@ import (
 )
 
 const (
-	Reset   = "\x1b[0m"
-	Bold    = "\x1b[1m"
-	Dim     = "\x1b[2m"
+	Reset = "\x1b[0m"
+	Bold  = "\x1b[1m"
+	Dim   = "\x1b[2m"
+
 	Red     = "\x1b[31m"
 	Green   = "\x1b[32m"
 	Yellow  = "\x1b[33m"
@@ -17,57 +18,65 @@ const (
 	Magenta = "\x1b[35m"
 	Cyan    = "\x1b[36m"
 	White   = "\x1b[37m"
-	Gray    = "\x1b[90m"
-	BgCyan  = "\x1b[46m"
+
+	BrightRed     = "\x1b[91m"
+	BrightGreen   = "\x1b[92m"
+	BrightYellow  = "\x1b[93m"
+	BrightBlue    = "\x1b[94m"
+	BrightMagenta = "\x1b[95m"
+	BrightCyan    = "\x1b[96m"
+	BrightWhite   = "\x1b[97m"
 )
 
-func ts() string {
-	return Gray + time.Now().Format("2006-01-02 15:04:05") + Reset
+func ts() string { return time.Now().Format("15:04:05") }
+
+func logLine(color, icon, level, msg string) {
+	t := ts()
+	lbl := fmt.Sprintf(" %s %-4s", icon, level)
+	fmt.Printf("%s %s%s %s\n", Dim+t+Reset, color+Bold+lbl+Reset, Dim+"│"+Reset, color+msg+Reset)
 }
 
 func Info(format string, args ...interface{}) {
-	fmt.Printf("%s %sℹ%s %s\n", ts(), Cyan+Bold, Reset, White+fmt.Sprintf(format, args...)+Reset)
+	logLine(BrightBlue, "ℹ", "INFO", fmt.Sprintf(format, args...))
 }
 
 func Ok(format string, args ...interface{}) {
-	fmt.Printf("%s %s✓%s %s\n", ts(), Green+Bold, Reset, Green+fmt.Sprintf(format, args...)+Reset)
+	logLine(BrightGreen, "✓", "OK", fmt.Sprintf(format, args...))
 }
 
 func Warn(format string, args ...interface{}) {
-	fmt.Printf("%s %s◆%s %s\n", ts(), Yellow+Bold, Reset, Yellow+fmt.Sprintf(format, args...)+Reset)
+	logLine(BrightYellow, "◆", "WARN", fmt.Sprintf(format, args...))
 }
 
 func Fail(format string, args ...interface{}) {
-	fmt.Printf("%s %s✗%s %s\n", ts(), Red+Bold, Reset, Red+fmt.Sprintf(format, args...)+Reset)
+	logLine(BrightRed, "✗", "FAIL", fmt.Sprintf(format, args...))
+}
+
+func Section(title string) {
+	fmt.Printf("\n%s%s%s %s %s\n", Bold+BrightMagenta, "━━━", title, "━━━", Reset)
+}
+
+func Divider() {
+	fmt.Println(Dim + strings.Repeat("─", 50) + Reset)
 }
 
 func Banner(title string, rows ...string) {
-	width := 50
-	hr := Dim + strings.Repeat("─", width) + Reset
-	fmt.Println()
-	fmt.Printf("%s%s%s %s\n", BgCyan, Bold+White, "  "+title+"  ", Reset)
-	fmt.Println(hr)
+	fmt.Printf("\n%s%s%s\n", Bold+BrightCyan, "  ■  "+title, Reset)
 	for _, r := range rows {
 		fmt.Printf("  %s\n", r)
 	}
-	fmt.Println(hr)
+	fmt.Println()
 }
 
 func ShowBanner(version string) {
-	b := Blue + Bold
+	b := BrightBlue + Bold
 	r := Reset
 	fmt.Println()
 	fmt.Printf("%s▄▄▄▄▄▄▄ ▄▄▄▄▄▄▄ ▄▄▄▄▄▄▄ ▄▄▄ ▄▄▄ ▄▄▄ ▄▄▄%s\n", b, r)
 	fmt.Printf("%s█ ▄▄▄ █ █ ▄▄▄ █ █ ▄▄▄ █ █▄▀█▀▄█ █▄▀█▀▄█%s\n", b, r)
 	fmt.Printf("%s█ ▄▄▄▄█ █ ▄ ▄▄█ █ █▄█ █ ▄█▀▄▀█▄  ▀█ █▀%s\n", b, r)
 	fmt.Printf("%s█▄█     █▄█▄▄▄█ █▄▄▄▄▄█ █▄█▀█▄█   █▄█  %s\n", b, r)
-	fmt.Printf("\n  %sv%s%s  |  %shttps://github.com/vanes430/raced_proxy%s\n\n", Gray, version, Reset, Blue, Reset)
+	fmt.Printf("\n  %sv%s%s  |  %shttps://github.com/vanes430/raced_proxy%s\n\n", Gray, version, Reset, BrightBlue, Reset)
 }
 
-func Section(title string) {
-	fmt.Printf("\n%s━━━ %s %s ━━━%s\n", Bold+Blue, title, Bold+Blue, Reset)
-}
-
-func Divider() {
-	fmt.Println(Dim + strings.Repeat("─", 50) + Reset)
-}
+var Gray = "\x1b[90m"

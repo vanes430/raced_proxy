@@ -66,6 +66,7 @@ func testIPLeak(proxyStr string, timeoutMs int) bool {
 }
 
 func testTarget(proxyStr string, timeoutMs int) bool {
+	scanTarget := config.GetEnv("SCAN_TARGET", "opencode.ai")
 	dialer := &net.Dialer{
 		Timeout:   time.Duration(timeoutMs) * time.Millisecond,
 		KeepAlive: 0,
@@ -77,7 +78,7 @@ func testTarget(proxyStr string, timeoutMs int) bool {
 	}
 	defer conn.Close()
 
-	req := "CONNECT opencode.ai:443 HTTP/1.1\r\nHost: opencode.ai:443\r\n\r\n"
+	req := fmt.Sprintf("CONNECT %s:443 HTTP/1.1\r\nHost: %s:443\r\n\r\n", scanTarget, scanTarget)
 	_, err = conn.Write([]byte(req))
 	if err != nil {
 		return false
@@ -90,7 +91,7 @@ func testTarget(proxyStr string, timeoutMs int) bool {
 		return false
 	}
 
-	tlsConn := tls.Client(conn, config.GetTLSConfig("opencode.ai"))
+	tlsConn := tls.Client(conn, config.GetTLSConfig(scanTarget))
 	defer tlsConn.Close()
 
 	err = tlsConn.HandshakeContext(context.Background())
@@ -98,8 +99,9 @@ func testTarget(proxyStr string, timeoutMs int) bool {
 		return false
 	}
 
-	chatBody := `{"model":"big-pickle","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`
-	postReq := fmt.Sprintf("POST /zen/v1/chat/completions HTTP/1.1\r\nHost: opencode.ai\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(chatBody), chatBody)
+	model := config.GetEnv("MODEL_NAME", "big-pickle")
+	chatBody := fmt.Sprintf(`{"model":"%s","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`, model)
+	postReq := fmt.Sprintf("POST /zen/v1/chat/completions HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", scanTarget, len(chatBody), chatBody)
 	_, err = tlsConn.Write([]byte(postReq))
 	if err != nil {
 		return false

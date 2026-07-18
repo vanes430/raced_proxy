@@ -17,35 +17,47 @@ import (
 	"raced_proxy/internal/proxy"
 )
 
+var (
+	raceCount   int
+	staggerMs   int
+	maxLatency  int
+	scanHost    string
+)
+
 func RunRotator() {
-	port := config.GetEnvInt("PORT", 8090)
-	outputFile := config.GetEnv("OUTPUT", "proxy.txt")
-	proxyUser := config.GetEnv("PROXY_USER", "")
-	proxyPass := config.GetEnv("PROXY_PASS", "")
+	port := config.GetEnvInt("LISTEN_PORT", 8090)
+	outputFile := config.GetEnv("PROXY_FILE", "proxy.txt")
+	proxyUser := config.GetEnv("AUTH_USER", "")
+	proxyPass := config.GetEnv("AUTH_PASS", "")
+	raceCount = config.GetEnvInt("RACE", 15)
+	staggerMs = config.GetEnvInt("STAGGER", 0)
+	maxLatency = config.GetEnvInt("MAX_LATENCY", 0)
+	scanHost = config.GetEnv("SCAN_TARGET", "opencode.ai")
 
 	logger.Info("Initializing rotator...")
 	logger.Info("Port: %d | Proxy file: %s", port, outputFile)
 
-	vpsIP := ""
+	hostIP := ""
 	ip, err := proxy.GetRealIP()
 	if err == nil {
-		vpsIP = ip
-		logger.Info("VPS IP: %s", vpsIP)
+		hostIP = ip
+		logger.Info("Host IP: %s", hostIP)
 	} else {
-		logger.Warn("VPS IP detection failed: %v", err)
+		logger.Warn("Host IP detection failed: %v", err)
 	}
 
-	proxy.InitPool(outputFile, vpsIP)
+		proxy.InitPool(outputFile, hostIP)
 	if proxy.GetProxiesCount() == 0 {
 		logger.Fail("No proxies found. Run scanner first.")
 		os.Exit(1)
 	}
 	logger.Ok("Proxy pool: %d loaded", proxy.GetProxiesCount())
 
+	proxy.InitWinnerConfig()
 	logger.Info("Bootstrapping top winners...")
 	proxy.Bootstrap(func(p string) (bool, int) {
 		t0 := time.Now()
-		status, _ := targetCheck(p, "opencode.ai", 443)
+		status, _ := targetCheck(p, scanHost, 443)
 		ms := int(time.Since(t0).Milliseconds())
 		if status == 200 {
 			logger.Ok("bootstrap OK %s (%dms)", p, ms)
@@ -83,10 +95,12 @@ func RunRotator() {
 		authStr = fmt.Sprintf("\x1b[32menabled\x1b[0m (%s)", proxyUser)
 	}
 
+	modelName := config.GetEnv("MODEL_NAME", "mimo-v2.5-free")
 	winners := proxy.GetTopWinners()
 	logger.Banner("PROXY ROTATOR",
 		fmt.Sprintf("Port:      %d", port),
-		fmt.Sprintf("VPS IP:    %s", vpsIP),
+		fmt.Sprintf("Model:     %s", modelName),
+		fmt.Sprintf("Host IP:   %s", hostIP),
 		fmt.Sprintf("Proxies:   %d loaded", proxy.GetProxiesCount()),
 		fmt.Sprintf("Winners:   %d", len(winners)),
 		fmt.Sprintf("Auth:      %s", authStr),
@@ -180,7 +194,25 @@ func onCONNECT(client net.Conn, target, from string) {
 	}
 	port, _ := strconv.Atoi(portStr)
 
-	for attempt := 0; attempt < 15; attempt++ {
+	// Route opencode.ai through proxy pool; other targets connect direct.
+	if !isRoutedHost(host) {
+		logger.Info("direct → %s:%d", host, port)
+		direct, err := net.DialTimeout("tcp", target, 5*time.Second)
+		if err != nil {
+			logger.Fail("direct dial FAIL %s:%d (%v)", host, port, err)
+			_, _ = client.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+			return
+		}
+		_, _ = client.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+		logger.Info("tunnel open → bridging %s ↔ %s:%d (direct)", from, host, port)
+		tunnelAndBridge(client, direct, "", host, port)
+		return
+	}
+
+	for attempt := 0; attempt < raceCount; attempt++ {
+		if attempt > 0 && staggerMs > 0 {
+			time.Sleep(time.Duration(staggerMs) * time.Millisecond)
+		}
 		p := proxy.PickTopWinner()
 		if p == "" {
 			logger.Warn("No top winner available")
@@ -190,6 +222,13 @@ func onCONNECT(client net.Conn, target, from string) {
 		t0 := time.Now()
 		status, respID := targetCheck(p, host, port)
 		ms := int(time.Since(t0).Milliseconds())
+
+		if maxLatency > 0 && ms > maxLatency {
+			logger.Warn("SLOW %s (%dms > %dms max)", p, ms, maxLatency)
+			proxy.RemoveWinner(p)
+			triggerRefill()
+			continue
+		}
 
 		if status != 200 {
 			if status == 429 || status == 403 {
@@ -203,7 +242,7 @@ func onCONNECT(client net.Conn, target, from string) {
 			continue
 		}
 
-		conn, err := net.DialTimeout("tcp", p, 6*time.Second)
+		conn, err := net.DialTimeout("tcp", p, 5*time.Second)
 		if err != nil {
 			logger.Warn("dial FAIL %s", p)
 			proxy.RemoveWinner(p)
@@ -219,7 +258,7 @@ func onCONNECT(client net.Conn, target, from string) {
 		}
 
 		resp := make([]byte, 1024)
-		conn.SetReadDeadline(time.Now().Add(6 * time.Second))
+		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 		n, err := conn.Read(resp)
 		conn.SetReadDeadline(time.Time{})
 		if err != nil || !strings.Contains(string(resp[:n]), "200") {
@@ -239,14 +278,21 @@ func onCONNECT(client net.Conn, target, from string) {
 	logger.Fail("ALL FAILED")
 }
 
+func isRoutedHost(host string) bool {
+	return host == scanHost || strings.HasSuffix(host, "."+scanHost)
+}
+
 func onHTTP(client net.Conn, firstChunk []byte, from string) {
-	for attempt := 0; attempt < 15; attempt++ {
+	for attempt := 0; attempt < raceCount; attempt++ {
+		if attempt > 0 && staggerMs > 0 {
+			time.Sleep(time.Duration(staggerMs) * time.Millisecond)
+		}
 		p := proxy.PickTopWinner()
 		if p == "" {
 			break
 		}
 
-		conn, err := net.DialTimeout("tcp", p, 6*time.Second)
+		conn, err := net.DialTimeout("tcp", p, 5*time.Second)
 		if err != nil {
 			proxy.RemoveWinner(p)
 			continue
@@ -285,7 +331,7 @@ func triggerRefill() {
 	if proxy.NeedRefill() {
 		go proxy.Refill(20, func(p string) (bool, int) {
 			t0 := time.Now()
-			status, _ := targetCheck(p, "opencode.ai", 443)
+			status, _ := targetCheck(p, scanHost, 443)
 			ms := int(time.Since(t0).Milliseconds())
 			if status == 200 {
 				return true, ms

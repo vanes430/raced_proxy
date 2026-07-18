@@ -27,31 +27,36 @@ type SourceData struct {
 var realIP string
 
 func RunScanner() {
-	targetURL := "https://opencode.ai/zen/v1/chat/completions"
-	timeoutMs := config.GetEnvInt("TIMEOUT", 1500)
-	outputFile := config.GetEnv("OUTPUT", "proxy.txt")
-	concurrencyLimit := config.GetEnvInt("CONCURRENCY", 1000)
+	targetURL := config.GetEnv("SCAN_TARGET", "https://opencode.ai/zen/v1/chat/completions")
+	timeoutMs := config.GetEnvInt("REQUEST_TIMEOUT", 1500)
+	outputFile := config.GetEnv("PROXY_FILE", "proxy.txt")
+	concurrencyLimit := config.GetEnvInt("WORKER_COUNT", 1000)
+
+	modelName := config.GetEnv("MODEL_NAME", "big-pickle")
 
 	logger.Banner("PROXY SCANNER (Golang Edition)",
 		fmt.Sprintf("Target:       %s", targetURL),
+		fmt.Sprintf("Model:        %s", modelName),
 		fmt.Sprintf("Timeout:      %dms", timeoutMs),
 		fmt.Sprintf("Concurrency:  %d", concurrencyLimit),
 		fmt.Sprintf("Output:       %s", outputFile),
+		fmt.Sprintf("Source File: %s", config.GetEnv("SOURCE_FILE", "url-list.txt")),
 	)
 
-	logger.Section("VPS IP DETECTION")
-	logger.Info("Detecting real VPS IP by contacting ifconfig.me...")
+	logger.Section("HOST IP DETECTION")
+	logger.Info("Detecting real host IP by contacting ifconfig.me...")
 	ip, err := proxy.GetRealIP()
 	if err == nil && ip != "" {
 		realIP = ip
-		logger.Ok("VPS IP detected: %s", realIP)
+		logger.Ok("Host IP detected: %s", realIP)
 	} else {
-		logger.Info("Could not detect VPS IP — leak detection disabled.")
+		logger.Info("Could not detect host IP — leak detection disabled.")
 	}
 	logger.Divider()
 
 	logger.Section("FETCHING PROXY SOURCES")
-	logger.Info("Reading proxy source URLs from url-list.txt...")
+	urlListFile := config.GetEnv("SOURCE_FILE", "url-list.txt")
+	logger.Info("Reading proxy source URLs from %s...", urlListFile)
 	allProxies, sources := fetchAllProxies()
 	if len(allProxies) == 0 {
 		logger.Fail("No proxies fetched from any source.")
@@ -93,7 +98,7 @@ func RunScanner() {
 	fmt.Println()
 
 	logger.Section("STAGE 2: TARGET ACCESSIBILITY")
-	logger.Info("Testing %d proxies against opencode.ai...", len(stage1Passed))
+	logger.Info("Testing %d proxies against %s...", len(stage1Passed), targetURL)
 	stage2Start := time.Now()
 	working := runStage2(stage1Passed, concurrencyLimit, timeoutMs)
 	stage2Elapsed := time.Since(stage2Start)

@@ -4,6 +4,9 @@
 # proxy pool
 proxy.txt
 
+# proxy source URLs (configured via URL_LIST in .env)
+url-list.txt
+
 # rate-limit archive
 proxy_bekas/
 
