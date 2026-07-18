@@ -11,7 +11,7 @@ Go-based proxy checker + rotator. Zero runtime dependencies — single static bi
 ## STRUCTURE
 
 ```
-raced_proxy/
+github.com/vanes430/raced_proxy/
 ├── cmd/raced_proxy/main.go    # Entry: CLI dispatcher (scan / rotate)
 ├── internal/
 │   ├── config/                # .env parser
@@ -63,7 +63,7 @@ raced_proxy/
 - **`InsecureSkipVerify: true`** (`config.go:43`) — TLS skips cert verification.
 - **Hardcoded target URLs** — `opencode.ai`, `ifconfig.me` baked in. Changing target requires rebuild.
 - **No Docker / no linter / no pre-commit hooks** — zero containerization or quality gates.
-- **Module path `raced_proxy` not VCS URL** — breaks `go install remote`.
+- **Module path `github.com/vanes430/raced_proxy`** — matches VCS URL, supports `go install`.
 
 ## UNIQUE STYLES
 

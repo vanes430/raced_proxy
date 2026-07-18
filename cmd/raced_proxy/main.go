@@ -5,9 +5,9 @@ import (
 	"os"
 	"strings"
 
-	"raced_proxy/internal/logger"
-	"raced_proxy/internal/rotator"
-	"raced_proxy/internal/scanner"
+	"github.com/vanes430/raced_proxy/internal/logger"
+	"github.com/vanes430/raced_proxy/internal/rotator"
+	"github.com/vanes430/raced_proxy/internal/scanner"
 )
 
 var Version = "dev"

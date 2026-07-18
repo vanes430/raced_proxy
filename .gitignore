@@ -17,8 +17,8 @@ proxy_bekas/
 .ua/
 
 # Go binaries
-raced_proxy
-raced_proxy.exe
+/raced_proxy
+/raced_proxy.exe
 
 # IDE
 .opencode/
