@@ -3,7 +3,7 @@
 Fast proxy checker + racing proxy server built with **Golang**. Zero runtime dependencies.
 
 [![release](https://img.shields.io/github/v/release/vanes430/raced_proxy)](https://github.com/vanes430/raced_proxy/releases)
-[![golangci-lint](https://golangci.com/badges/github.com/vanes430/raced_proxy.svg)](https://golangci.com/report/github.com/vanes430/raced_proxy)
+[![lint](https://img.shields.io/github/actions/workflow/status/vanes430/raced_proxy/release.yml?label=golangci-lint&logo=golangci-lint&logoColor=white)](https://github.com/vanes430/raced_proxy/actions/workflows/release.yml)
 
 ## Features
 
