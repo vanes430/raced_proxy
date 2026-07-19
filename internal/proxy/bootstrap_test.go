@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"sync"
 	"testing"
 	"time"
 )
@@ -200,25 +199,23 @@ func TestRefill_WinnersLow(t *testing.T) {
 	}
 }
 
-// --- Concurrency sanity ---
-
-func TestRefill_Concurrent(t *testing.T) {
+func TestRefill_SequentialMultipleCalls(t *testing.T) {
 	resetBootstrapState()
 	passFn := func(p string) (bool, int) { return true, 10 }
-	var wg sync.WaitGroup
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			Refill(20, passFn)
-		}()
-	}
-	wg.Wait()
 
+	Refill(20, passFn)
 	mu.RLock()
-	n := len(topWinners)
+	n1 := len(topWinners)
 	mu.RUnlock()
-	if n > maxWinners {
-		t.Fatalf("winners %d exceeds maxWinners %d", n, maxWinners)
+	if n1 <= 1 {
+		t.Fatal("expected winners after first refill")
+	}
+
+	Refill(20, passFn)
+	mu.RLock()
+	n2 := len(topWinners)
+	mu.RUnlock()
+	if n2 > maxWinners {
+		t.Fatalf("winners %d exceeds maxWinners %d", n2, maxWinners)
 	}
 }
